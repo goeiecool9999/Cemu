@@ -67,6 +67,13 @@ option(ENABLE_OPENGL "Enables the OpenGL backend" ON)
 option(ENABLE_VULKAN "Enables the Vulkan backend" ON)
 option(ENABLE_DISCORD_RPC "Enables the Discord Rich Presence feature" ON)
 
+if (UNIX AND NOT APPLE)
+	option(ENABLE_FONTCONFIG "Use fontconfig to load fonts" ON)
+	if(ENABLE_FONTCONFIG)
+		add_compile_definitions(USE_FONTCONFIG)
+	endif()
+endif()
+
 # input backends
 if (WIN32)
 	option(ENABLE_XINPUT "Enables the usage of XInput" ON)

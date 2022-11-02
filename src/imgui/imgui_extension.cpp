@@ -7,6 +7,10 @@
 #include "imgui_impl_vulkan.h"
 #include "input/InputManager.h"
 
+#if BOOST_OS_LINUX and USE_FONTCONFIG
+#include <fontconfig/fontconfig.h>
+#endif
+
 // <imgui_internal.h>
 template<typename T> static T ImMin(T lhs, T rhs) { return lhs < rhs ? lhs : rhs; }
 template<typename T> static T ImMax(T lhs, T rhs) { return lhs >= rhs ? lhs : rhs; }
@@ -40,12 +44,80 @@ void ImRotateEnd(float rad, ImVec2 center)
 		buf[i].pos = ImRotate(buf[i].pos, s, c) - center;
 }
 
+#if BOOST_OS_LINUX and USE_FONTCONFIG
+// heavily based on https://gist.github.com/CallumDev/7c66b3f9cf7a876ef75f
+fs::path lookupFontFileWithFontconfig(const std::string_view& family, const std::string_view& style)
+{
+	fs::path ret{};
+	if (!FcInit())
+	{
+		return ret;
+	}
+	FcConfig* fcConfig = FcInitLoadConfigAndFonts();
+
+	FcPattern* pattern = FcNameParse((const FcChar8*)family.data());
+	if(!style.empty())
+		FcPatternAddString(pattern, FC_STYLE, (const FcChar8*)style.data());
+	FcConfigSubstitute(fcConfig, pattern, FcMatchFont);
+	FcDefaultSubstitute(pattern);
+
+	char* fontPath;
+	FcResult result;
+
+	FcPattern* font = FcFontMatch(fcConfig, pattern, &result);
+	if (font)
+	{
+		if (FcPatternGetString(font, FC_FILE, 0, (FcChar8**)&fontPath) == FcResultMatch)
+		{
+			ret = fs::path{std::string{fontPath}};
+		}
+		FcPatternDestroy(font);
+	}
+
+	FcPatternDestroy(pattern);
+
+	FcConfigDestroy(fcConfig);
+//	FcFini(); calling this causes a crash.
+	return ret;
+}
+
+std::vector<char> loadFontDataWithFontconfig(const std::string_view& family, const std::string_view& style = "")
+{
+	std::vector<char> result{};
+	std::error_code ec;
+	fs::path fontFile = lookupFontFileWithFontconfig(family, style);
+	if (!fs::exists(fontFile, ec))
+		return result;
+
+	std::ifstream fileIn{fontFile, std::ios::binary};
+	if(!fileIn)
+		return result;
+
+	auto size = fs::file_size(fontFile);
+	result.resize(size);
+	fileIn.read(result.data(), size);
+
+	return result;
+}
+
+std::vector<char> ImGui_LoadAwesomeWithFontconfig()
+{
+	// using fontawesome family and solid style seems to be the right parameters to
+	// make fontconfig pick v4 if it's available and solid v6 if both or only v6 are present
+	// prefer v4 because cemu uses it by default
+	std::vector<char> fontFile = loadFontDataWithFontconfig("FontAwesome", "Solid");
+	return fontFile;
+}
+#endif
+
 uint8* extractCafeDefaultFont(sint32* size);
 sint32 g_font_size = 0;
 uint8* g_font_data = nullptr;
-#if !BOOST_OS_WINDOWS
+#if BOOST_OS_MACOS or (BOOST_OS_LINUX and not USE_FONTCONFIG)
 extern int const g_fontawesome_size;
 extern char const g_fontawesome_data[];
+#elif BOOST_OS_LINUX and USE_FONTCONFIG
+std::vector<char> g_fontawesome_data{};
 #endif
 std::unordered_map<int, ImFont*> g_imgui_fonts;
 std::stack<int> g_font_requests;
@@ -92,7 +164,14 @@ void ImGui_PrecacheFonts()
 				io.Fonts->AddFontFromMemoryTTF(data, (int)len, (float)size, &cfgmerge, icon_ranges);
 			}
 		}
-#else
+#endif
+#if BOOST_OS_LINUX and USE_FONTCONFIG
+		if(g_fontawesome_data.empty())
+			g_fontawesome_data = ImGui_LoadAwesomeWithFontconfig();
+		cemu_assert(g_fontawesome_data.size() <= std::numeric_limits<int>::max());
+		if(!g_fontawesome_data.empty())
+			io.Fonts->AddFontFromMemoryTTF((void*)g_fontawesome_data.data(), (int)g_fontawesome_data.size(), (float)size, &cfgmerge, icon_ranges);
+#elif BOOST_OS_LINUX or BOOST_OS_MACOS
 		io.Fonts->AddFontFromMemoryTTF((void*)g_fontawesome_data, (int)g_fontawesome_size, (float)size, &cfgmerge, icon_ranges);
 #endif
 

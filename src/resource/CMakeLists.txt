@@ -12,7 +12,9 @@ embedded/resources.h
 
 if(UNIX)
     if(NOT APPLE)
-        target_sources(CemuResource PRIVATE embedded/fontawesome.S)
+        if(NOT ENABLE_FONTCONFIG)
+            target_sources(CemuResource PRIVATE embedded/fontawesome.S)
+        endif()
     else()
         target_sources(CemuResource PRIVATE embedded/fontawesome_macos.S)
     endif()
