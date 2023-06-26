@@ -12,9 +12,14 @@
 #include "gui/helpers/wxHelpers.h"
 #include "Cemu/ncrypto/ncrypto.h"
 
+#if BOOST_OS_LINUX && HAS_WAYLAND
+#include "gui/helpers/wxWayland.h"
+#endif
+
 #include <wx/image.h>
 #include <wx/filename.h>
 #include <wx/stdpaths.h>
+#include "wxHelper.h"
 
 #include "Cafe/TitleList/TitleList.h"
 #include "Cafe/TitleList/SaveList.h"
@@ -75,8 +80,8 @@ bool CemuApp::OnInit()
 {
 	fs::path user_data_path, config_path, cache_path, data_path;
 	auto standardPaths = wxStandardPaths::Get();
-#ifdef PORTABLE
 	fs::path exePath(standardPaths.GetExecutablePath().ToStdString());
+#ifdef PORTABLE
 #if MACOS_BUNDLE
     exePath = exePath.parent_path().parent_path().parent_path();
 #endif
@@ -103,7 +108,7 @@ bool CemuApp::OnInit()
 	cache_path = standardPaths.GetUserDir(wxStandardPaths::Dir::Dir_Cache).ToStdString();
 	cache_path /= appName.ToStdString();
 #endif
-	auto failed_write_access = ActiveSettings::LoadOnce(user_data_path, config_path, cache_path, data_path);
+	auto failed_write_access = ActiveSettings::LoadOnce(exePath, user_data_path, config_path, cache_path, data_path);
 	for (auto&& path : failed_write_access)
 		wxMessageBox(fmt::format("Cemu can't write to {} !", path.generic_string()), _("Warning"), wxOK | wxCENTRE | wxICON_EXCLAMATION, nullptr);
 
@@ -174,6 +179,28 @@ bool CemuApp::OnInit()
 
 	SetTopWindow(m_mainFrame);
 	m_mainFrame->Show();
+
+#if BOOST_OS_LINUX && HAS_WAYLAND
+	if (wxWlIsWaylandWindow(m_mainFrame))
+		wxWlSetAppId(m_mainFrame, "info.cemu.Cemu");
+#endif
+
+	// show warning on macOS about state of builds
+#if BOOST_OS_MACOS
+	if (!GetConfig().did_show_macos_disclaimer)
+	{
+		const auto message = _(
+			"Thank you for testing the in-development build of Cemu for macOS.\n \n"
+			"The macOS port is currently purely experimental and should not be considered stable or ready for issue-free gameplay. "
+			"There are also known issues with degraded performance due to the use of MoltenVk and Rosetta for ARM Macs. We appreciate your patience while we improve Cemu for macOS.");
+		wxMessageDialog dialog(nullptr, message, "Preview version", wxCENTRE | wxOK | wxICON_WARNING);
+		dialog.SetOKLabel(_("I understand"));
+		dialog.ShowModal();
+		GetConfig().did_show_macos_disclaimer = true;
+		g_config.Save();
+	}
+#endif
+
 	return true;
 }
 
@@ -218,9 +245,11 @@ int CemuApp::FilterEvent(wxEvent& event)
 		const auto& key_event = (wxKeyEvent&)event;
 		g_window_info.set_keystate(fix_raw_keycode(key_event.GetRawKeyCode(), key_event.GetRawKeyFlags()), false);
 	}
-	else if(event.GetEventType() == wxEVT_KILL_FOCUS)
+	else if(event.GetEventType() == wxEVT_ACTIVATE_APP)
 	{
-		g_window_info.set_keystatesdown();
+		const auto& activate_event = (wxActivateEvent&)event;
+		if(!activate_event.GetActive())
+			g_window_info.set_keystatesup();
 	}
 
 	return wxApp::FilterEvent(event);
@@ -257,12 +286,12 @@ std::vector<const wxLanguageInfo*> CemuApp::GetAvailableLanguages()
 
 void CemuApp::CreateDefaultFiles(bool first_start)
 {
-	std::wstring mlc = GetMLCPath().ToStdWstring();
+	fs::path mlc = ActiveSettings::GetMlcPath();
 
 	// check for mlc01 folder missing if custom path has been set
 	if (!fs::exists(mlc) && !first_start)
 	{
-		const std::wstring message = fmt::format(fmt::runtime(_(L"Your mlc01 folder seems to be missing.\n\nThis is where Cemu stores save files, game updates and other Wii U files.\n\nThe expected path is:\n{}\n\nDo you want to create the folder at the expected path?").ToStdWstring()), mlc);
+		const std::wstring message = fmt::format(fmt::runtime(_(L"Your mlc01 folder seems to be missing.\n\nThis is where Cemu stores save files, game updates and other Wii U files.\n\nThe expected path is:\n{}\n\nDo you want to create the folder at the expected path?").ToStdWstring()), mlc.wstring());
 		
 		wxMessageDialog dialog(nullptr, message, "Error", wxCENTRE | wxYES_NO | wxCANCEL| wxICON_WARNING);
 		dialog.SetYesNoCancelLabels(_("Yes"), _("No"), _("Select a custom path"));
@@ -273,12 +302,11 @@ void CemuApp::CreateDefaultFiles(bool first_start)
 		{
 			if (!SelectMLCPath())
 				return;
-
-			mlc = GetMLCPath();
+			mlc = ActiveSettings::GetMlcPath();
 		}
 		else
 		{
-			GetConfig().mlc_path = L"";
+			GetConfig().mlc_path = "";
 			g_config.Save();
 		}
 	}
@@ -286,22 +314,22 @@ void CemuApp::CreateDefaultFiles(bool first_start)
 	// create sys/usr folder in mlc01
 	try
 	{
-		const auto sysFolder = fs::path(mlc).append(L"sys");
+		const auto sysFolder = fs::path(mlc).append("sys");
 		fs::create_directories(sysFolder);
 
-		const auto usrFolder = fs::path(mlc).append(L"usr");
+		const auto usrFolder = fs::path(mlc).append("usr");
 		fs::create_directories(usrFolder);
 		fs::create_directories(fs::path(usrFolder).append("title/00050000")); // base
 		fs::create_directories(fs::path(usrFolder).append("title/0005000c")); // dlc
 		fs::create_directories(fs::path(usrFolder).append("title/0005000e")); // update
 
 		// Mii Maker save folders {0x500101004A000, 0x500101004A100, 0x500101004A200},
-		fs::create_directories(fs::path(mlc).append(L"usr/save/00050010/1004a000/user/common/db"));
-		fs::create_directories(fs::path(mlc).append(L"usr/save/00050010/1004a100/user/common/db"));
-		fs::create_directories(fs::path(mlc).append(L"usr/save/00050010/1004a200/user/common/db"));
+		fs::create_directories(fs::path(mlc).append("usr/save/00050010/1004a000/user/common/db"));
+		fs::create_directories(fs::path(mlc).append("usr/save/00050010/1004a100/user/common/db"));
+		fs::create_directories(fs::path(mlc).append("usr/save/00050010/1004a200/user/common/db"));
 
 		// lang files
-		auto langDir = fs::path(mlc).append(L"sys/title/0005001b/1005c000/content");
+		const auto langDir = fs::path(mlc).append("sys/title/0005001b/1005c000/content");
 		fs::create_directories(langDir);
 
 		auto langFile = fs::path(langDir).append("language.txt");
@@ -338,7 +366,7 @@ void CemuApp::CreateDefaultFiles(bool first_start)
 	catch (const std::exception& ex)
 	{
 		std::stringstream errorMsg;
-		errorMsg << fmt::format(fmt::runtime(_("Couldn't create a required mlc01 subfolder or file!\n\nError: {0}\nTarget path:\n{1}").ToStdString()), ex.what(), boost::nowide::narrow(mlc));
+		errorMsg << fmt::format(fmt::runtime(_("Couldn't create a required mlc01 subfolder or file!\n\nError: {0}\nTarget path:\n{1}").ToStdString()), ex.what(), _pathToUtf8(mlc));
 
 #if BOOST_OS_WINDOWS
 		const DWORD lastError = GetLastError();
@@ -353,11 +381,11 @@ void CemuApp::CreateDefaultFiles(bool first_start)
 	// cemu directories
 	try
 	{
-		const auto controllerProfileFolder = GetConfigPath(L"controllerProfiles").ToStdWstring();
+		const auto controllerProfileFolder = ActiveSettings::GetConfigPath("controllerProfiles");
 		if (!fs::exists(controllerProfileFolder))
 			fs::create_directories(controllerProfileFolder);
 
-		const auto memorySearcherFolder = GetUserDataPath(L"memorySearcher").ToStdWstring();
+		const auto memorySearcherFolder = ActiveSettings::GetUserDataPath("memorySearcher");
 		if (!fs::exists(memorySearcherFolder))
 			fs::create_directories(memorySearcherFolder);
 	}
@@ -379,12 +407,12 @@ void CemuApp::CreateDefaultFiles(bool first_start)
 }
 
 
-bool CemuApp::TrySelectMLCPath(std::wstring path)
+bool CemuApp::TrySelectMLCPath(fs::path path)
 {
 	if (path.empty())
-		path = ActiveSettings::GetDefaultMLCPath().wstring();
+		path = ActiveSettings::GetDefaultMLCPath();
 
-	if (!TestWriteAccess(fs::path{ path }))
+	if (!TestWriteAccess(path))
 		return false;
 
 	GetConfig().SetMLCPath(path);
@@ -402,14 +430,14 @@ bool CemuApp::SelectMLCPath(wxWindow* parent)
 {
 	auto& config = GetConfig();
 	
-	std::wstring default_path;
-	if (fs::exists(config.mlc_path.GetValue()))
-		default_path = config.mlc_path.GetValue();
+	fs::path default_path;
+	if (fs::exists(_utf8ToPath(config.mlc_path.GetValue())))
+		default_path = _utf8ToPath(config.mlc_path.GetValue());
 
 	// try until users selects a valid path or aborts
 	while(true)
 	{
-		wxDirDialog path_dialog(parent, _("Select a mlc directory"), default_path, wxDD_DEFAULT_STYLE | wxDD_DIR_MUST_EXIST);
+		wxDirDialog path_dialog(parent, _("Select a mlc directory"), wxHelper::FromPath(default_path), wxDD_DEFAULT_STYLE | wxDD_DIR_MUST_EXIST);
 		if (path_dialog.ShowModal() != wxID_OK || path_dialog.GetPath().empty())
 			return false;
 
@@ -429,37 +457,6 @@ bool CemuApp::SelectMLCPath(wxWindow* parent)
 
 	return false;
 }
-
-
-wxString CemuApp::GetMLCPath()
-{
-	return ActiveSettings::GetMlcPath().generic_wstring();
-}
-
-wxString CemuApp::GetMLCPath(const wxString& cat)
-{
-	return ActiveSettings::GetMlcPath(cat.ToStdString()).generic_wstring();
-}
-
-wxString CemuApp::GetConfigPath()
-{
-	return ActiveSettings::GetConfigPath().generic_wstring();
-};
-
-wxString CemuApp::GetConfigPath(const wxString& cat)
-{
-	return ActiveSettings::GetConfigPath(cat.ToStdString()).generic_wstring();
-};
-
-wxString CemuApp::GetUserDataPath()
-{
-	return ActiveSettings::GetUserDataPath().generic_wstring();
-};
-
-wxString CemuApp::GetUserDataPath(const wxString& cat)
-{
-	return ActiveSettings::GetUserDataPath(cat.ToStdString()).generic_wstring();
-};
 
 void CemuApp::ActivateApp(wxActivateEvent& event)
 {

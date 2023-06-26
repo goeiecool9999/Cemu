@@ -6,11 +6,22 @@ option(MACOS_BUNDLE "The executable when built on macOS will be created as an ap
 set(EXPERIMENTAL_VERSION "" CACHE STRING "") # used by CI script to set experimental version
 
 if (EXPERIMENTAL_VERSION)
-  add_definitions(-DEMULATOR_VERSION_MINOR=${EXPERIMENTAL_VERSION})
+	add_definitions(-DEMULATOR_VERSION_MINOR=${EXPERIMENTAL_VERSION})
+	execute_process(
+			COMMAND git log --format=%h -1
+			WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+			OUTPUT_VARIABLE GIT_HASH
+			OUTPUT_STRIP_TRAILING_WHITESPACE
+	)
+	add_definitions(-DEMULATOR_HASH=${GIT_HASH})
 endif()
 
 if (ENABLE_VCPKG)
-	set(VCPKG_OVERLAY_PORTS "${CMAKE_CURRENT_LIST_DIR}/dependencies/vcpkg_overlay_ports")
+	if(UNIX AND NOT APPLE)
+		set(VCPKG_OVERLAY_PORTS "${CMAKE_CURRENT_LIST_DIR}/dependencies/vcpkg_overlay_ports_linux")
+	else()
+		set(VCPKG_OVERLAY_PORTS "${CMAKE_CURRENT_LIST_DIR}/dependencies/vcpkg_overlay_ports")
+	endif()
 	set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/vcpkg/scripts/buildsystems/vcpkg.cmake"
 		CACHE STRING "Vcpkg toolchain file")
 	# Set this so that all the various find_package() calls don't need an explicit
@@ -21,7 +32,7 @@ if (ENABLE_VCPKG)
 	endif()
 endif()
 
-project(Cemu VERSION 2.0)
+project(Cemu VERSION 2.0.0)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
@@ -63,9 +74,15 @@ if (APPLE)
     enable_language(OBJC OBJCXX)
 endif()
 
+if (UNIX AND NOT APPLE)
+	option(ENABLE_WAYLAND "Build with Wayland support" ON)
+	option(ENABLE_FERAL_GAMEMODE "Enables Feral Interactive GameMode Support" ON)
+endif()
+
 option(ENABLE_OPENGL "Enables the OpenGL backend" ON)
 option(ENABLE_VULKAN "Enables the Vulkan backend" ON)
 option(ENABLE_DISCORD_RPC "Enables the Discord Rich Presence feature" ON)
+
 
 # input backends
 if (WIN32)
@@ -107,6 +124,21 @@ endif()
 
 if (UNIX AND NOT APPLE)
 	find_package(X11 REQUIRED)
+	if (ENABLE_WAYLAND)
+		find_package(Wayland REQUIRED Client)
+		find_package(WaylandScanner REQUIRED)
+		find_package(WaylandProtocols 1.15 REQUIRED)
+
+		ecm_add_wayland_client_protocol(WAYLAND_PROTOCOL_SRCS
+			PROTOCOL "${WaylandProtocols_DATADIR}/stable/viewporter/viewporter.xml"
+			BASENAME viewporter)
+		add_library(CemuWaylandProtocols STATIC ${WAYLAND_PROTOCOL_SRCS})
+		target_include_directories(CemuWaylandProtocols PUBLIC "${CMAKE_CURRENT_BINARY_DIR}")
+
+		add_compile_definitions(HAS_WAYLAND)
+	endif()
+	find_package(GTK3 REQUIRED)
+
 endif()
 
 if (ENABLE_VULKAN)
@@ -123,12 +155,22 @@ if (ENABLE_DISCORD_RPC)
 	target_include_directories(discord-rpc INTERFACE ./dependencies/discord-rpc/include)
 endif()
 
+if(UNIX AND NOT APPLE)
+	if(ENABLE_FERAL_GAMEMODE)
+		add_compile_definitions(ENABLE_FERAL_GAMEMODE)
+		add_subdirectory(dependencies/gamemode EXCLUDE_FROM_ALL)
+		target_include_directories(gamemode INTERFACE ./dependencies/gamemode/lib)
+	endif()
+endif()
+
 if (ENABLE_WXWIDGETS)
 	find_package(wxWidgets 3.2 REQUIRED COMPONENTS base core gl propgrid xrc)
 endif()
 
 if (ENABLE_CUBEB)
+	if (NOT ENABLE_VCPKG)
 	find_package(cubeb)
+	endif()
 	if (NOT cubeb_FOUND)
 		option(BUILD_TESTS "" OFF)
 		option(BUILD_TOOLS "" OFF)

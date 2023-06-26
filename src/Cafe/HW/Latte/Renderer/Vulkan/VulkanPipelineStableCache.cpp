@@ -59,7 +59,6 @@ uint32 VulkanPipelineStableCache::BeginLoading(uint64 cacheTitleId)
 
 	// open cache file or create it
 	cemu_assert_debug(s_cache == nullptr);
-	const uint32 cacheFileVersion = 1;
 	s_cache = FileCache::Open(pathCacheFile.generic_wstring(), true, LatteShaderCache_getPipelineCacheExtraVersion(cacheTitleId));
 	if (!s_cache)
 	{
@@ -232,7 +231,7 @@ void VulkanPipelineStableCache::LoadPipelineFromCache(std::span<uint8> fileData)
 		vertexShader = LatteSHRC_FindVertexShader(cachedPipeline->vsHash.baseHash, cachedPipeline->vsHash.auxHash);
 		if (!vertexShader)
 		{
-			forceLogDebug_printf("Vertex shader not found in cache");
+			cemuLog_logDebug(LogType::Force, "Vertex shader not found in cache");
 			return;
 		}
 	}
@@ -242,7 +241,7 @@ void VulkanPipelineStableCache::LoadPipelineFromCache(std::span<uint8> fileData)
 		geometryShader = LatteSHRC_FindGeometryShader(cachedPipeline->gsHash.baseHash, cachedPipeline->gsHash.auxHash);
 		if (!geometryShader)
 		{
-			forceLogDebug_printf("Geometry shader not found in cache");
+			cemuLog_logDebug(LogType::Force, "Geometry shader not found in cache");
 			return;
 		}
 	}
@@ -252,7 +251,7 @@ void VulkanPipelineStableCache::LoadPipelineFromCache(std::span<uint8> fileData)
 		pixelShader = LatteSHRC_FindPixelShader(cachedPipeline->psHash.baseHash, cachedPipeline->psHash.auxHash);
 		if (!pixelShader)
 		{
-			forceLogDebug_printf("Pixel shader not found in cache");
+			cemuLog_logDebug(LogType::Force, "Pixel shader not found in cache");
 			return;
 		}
 	}

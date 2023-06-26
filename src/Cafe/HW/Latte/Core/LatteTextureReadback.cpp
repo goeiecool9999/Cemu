@@ -21,6 +21,7 @@ std::queue<LatteTextureReadbackInfo*> sTextureActiveReadbackQueue; // readbacks 
 
 void LatteTextureReadback_StartTransfer(LatteTextureView* textureView)
 {
+	cemuLog_log(LogType::TextureReadback, "[TextureReadback-Start] PhysAddr {:08x} Res {}x{} Fmt {} Slice {} Mip {}", textureView->baseTexture->physAddress, textureView->baseTexture->width, textureView->baseTexture->height, textureView->baseTexture->format, textureView->firstSlice, textureView->firstMip);
 	// create info entry and store in ordered linked list
 	LatteTextureReadbackInfo* readbackInfo = g_renderer->texture_createReadback(textureView);
 	sTextureActiveReadbackQueue.push(readbackInfo);
@@ -30,8 +31,8 @@ void LatteTextureReadback_StartTransfer(LatteTextureView* textureView)
 }
 
 /*
- * Checks for queued transfers and starts them if at least one drawcall has passed since the last write
- * Called after a draw operation has finished
+ * Checks for queued transfers and starts them if at least five drawcalls have passed since the last write
+ * Called after a draw sequence is completed
  * Returns true if at least one transfer was started
  */
 bool LatteTextureReadback_Update(bool forceStart)
@@ -41,12 +42,14 @@ bool LatteTextureReadback_Update(bool forceStart)
 	{
 		LatteTextureReadbackQueueEntry& entry = sTextureScheduledReadbacks[i];
 		uint32 numPassedDrawcalls = LatteGPUState.drawCallCounter - entry.lastUpdateDrawcallIndex;
-		// initiate transfer
-		LatteTextureReadback_StartTransfer(entry.textureView);
-		// remove element
-		vectorRemoveByIndex(sTextureScheduledReadbacks, i);
-		i--;
-		hasStartedTransfer = true;
+		if (forceStart || numPassedDrawcalls >= 5)
+		{
+			LatteTextureReadback_StartTransfer(entry.textureView);
+			// remove element
+			vectorRemoveByIndex(sTextureScheduledReadbacks, i);
+			i--;
+			hasStartedTransfer = true;
+		}
 	}
 	return hasStartedTransfer;
 }
@@ -73,7 +76,7 @@ void LatteTextureReadback_Initate(LatteTextureView* textureView)
 	// currently we don't support readback for resized textures
 	if (textureView->baseTexture->overwriteInfo.hasResolutionOverwrite)
 	{
-		forceLog_printf("_initate(): Readback is not supported for textures with modified resolution");
+		cemuLog_log(LogType::Force, "_initate(): Readback is not supported for textures with modified resolution");
 		return;
 	}
 	// check if texture isn't already queued for transfer
@@ -125,7 +128,7 @@ void LatteTextureReadback_UpdateFinishedTransfers(bool forceFinish)
 		HRTick currentTick = HighResolutionTimer().now().getTick();
 		double elapsedSecondsTransfer = HighResolutionTimer::getTimeDiff(readbackInfo->transferStartTime, currentTick);
 		double elapsedSecondsWaiting = HighResolutionTimer::getTimeDiff(readbackInfo->waitStartTime, currentTick);
-		forceLog_printf("[Texture-Readback] %08x Res %4d/%4d TM %d FMT %04x ReadbackLatency: %6.3lfms WaitTime: %6.3lfms ForcedWait %s", readbackInfo->hostTextureCopy.physAddress, readbackInfo->hostTextureCopy.width, readbackInfo->hostTextureCopy.height, readbackInfo->hostTextureCopy.tileMode, (uint32)readbackInfo->hostTextureCopy.format, elapsedSecondsTransfer * 1000.0, elapsedSecondsWaiting * 1000.0, forceFinish?"yes":"no");
+		cemuLog_log(LogType::Force, "[Texture-Readback] {:08x} Res {:4}/{:4} TM {} FMT {:04x} ReadbackLatency: {:6.3}ms WaitTime: {:6.3}ms ForcedWait {}", readbackInfo->hostTextureCopy.physAddress, readbackInfo->hostTextureCopy.width, readbackInfo->hostTextureCopy.height, readbackInfo->hostTextureCopy.tileMode, (uint32)readbackInfo->hostTextureCopy.format, elapsedSecondsTransfer * 1000.0, elapsedSecondsWaiting * 1000.0, forceFinish?"yes":"no");
 #endif
 		uint8* pixelData = readbackInfo->GetData();
 		LatteTextureLoader_writeReadbackTextureToMemory(&readbackInfo->hostTextureCopy, 0, 0, pixelData);

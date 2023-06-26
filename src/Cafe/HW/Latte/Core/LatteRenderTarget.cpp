@@ -507,7 +507,7 @@ bool LatteMRT::UpdateCurrentFBO()
 		else if (rtEffectiveSize->width != effectiveWidth && rtEffectiveSize->height != effectiveHeight)
 		{
 #ifdef CEMU_DEBUG_ASSERT
-			forceLog_printf("Color buffer size mismatch (%dx%d). Effective size: %dx%d Real size: %dx%d Mismatching texture: %08x %dx%d fmt %04x", rtEffectiveSize->width, rtEffectiveSize->height, effectiveWidth, effectiveHeight, colorAttachmentView->baseTexture->width, colorAttachmentView->baseTexture->height, colorAttachmentView->baseTexture->physAddress, colorAttachmentView->baseTexture->width, colorAttachmentView->baseTexture->height, (uint32)colorAttachmentView->baseTexture->format);
+			cemuLog_log(LogType::Force, "Color buffer size mismatch ({}x{}). Effective size: {}x{} Real size: {}x{} Mismatching texture: {:08x} {}x{} fmt {:04x}", rtEffectiveSize->width, rtEffectiveSize->height, effectiveWidth, effectiveHeight, colorAttachmentView->baseTexture->width, colorAttachmentView->baseTexture->height, colorAttachmentView->baseTexture->physAddress, colorAttachmentView->baseTexture->width, colorAttachmentView->baseTexture->height, (uint32)colorAttachmentView->baseTexture->format);
 #endif
 		}
 		// currently the first color attachment defines the size of the current render target
@@ -588,7 +588,6 @@ bool LatteMRT::UpdateCurrentFBO()
 				if (depthBufferView == nullptr)
 				{
 					// create depth buffer view
-					forceLogDebug_printf("Creating depth buffer tex %08x %dx%d slice %d", depthBufferPhysMem, depthBufferHeight, depthBufferWidth, depthBufferViewFirstSlice);
 					if(depthBufferViewFirstSlice == 0)
 						depthBufferView = LatteTexture_CreateMapping(depthBufferPhysMem, 0, depthBufferWidth, depthBufferHeight, 1, depthBufferPitch, depthBufferTileMode, depthBufferSwizzle, 0, 1, 0, 1, depthBufferFormat, Latte::E_DIM::DIM_2D, Latte::E_DIM::DIM_2D, true);
 					else
@@ -612,7 +611,7 @@ bool LatteMRT::UpdateCurrentFBO()
 				{
 					if (_depthBufferSizeWarningCount < 100)
 					{
-						forceLogDebug_printf("Depth buffer size too small. Effective size: %dx%d Real size: %dx%d Mismatching texture: %08x %dx%d fmt %04x", effectiveWidth, effectiveHeight, depthBufferView->baseTexture->width, depthBufferView->baseTexture->height, depthBufferView->baseTexture->physAddress, depthBufferView->baseTexture->width, depthBufferView->baseTexture->height, (uint32)depthBufferView->baseTexture->format);
+						cemuLog_logDebug(LogType::Force, "Depth buffer size too small. Effective size: {}x{} Real size: {}x{} Mismatching texture: {:08x} {}x{} fmt {:04x}", effectiveWidth, effectiveHeight, depthBufferView->baseTexture->width, depthBufferView->baseTexture->height, depthBufferView->baseTexture->physAddress, depthBufferView->baseTexture->width, depthBufferView->baseTexture->height, (uint32)depthBufferView->baseTexture->format);
 						_depthBufferSizeWarningCount++;
 					}
 				}
@@ -722,7 +721,7 @@ void LatteRenderTarget_applyTextureColorClear(LatteTexture* texture, uint32 slic
 {
 	if (texture->isDepth)
 	{
-		forceLogDebug_printf("Unsupported clear depth as color");
+		cemuLog_logDebug(LogType::Force, "Unsupported clear depth as color");
 	}
 	else
 	{
@@ -848,9 +847,9 @@ void LatteRenderTarget_getScreenImageArea(sint32* x, sint32* y, sint32* width, s
 {
 	int w, h;
 	if(padView && gui_isPadWindowOpen())
-		gui_getPadWindowSize(&w, &h);
+		gui_getPadWindowPhysSize(w, h);
 	else
-		gui_getWindowSize(&w, &h);
+		gui_getWindowPhysSize(w, h);
 
 	sint32 scaledOutputX;
 	sint32 scaledOutputY;
@@ -1004,7 +1003,6 @@ void LatteRenderTarget_copyToBackbuffer(LatteTextureView* textureView, bool isPa
 	g_renderer->ImguiEnd();
 }
 
-bool alwaysDisplayDRC = false;
 bool ctrlTabHotkeyPressed = false;
 
 void LatteRenderTarget_itHLECopyColorBufferToScanBuffer(MPTR colorBufferPtr, uint32 colorBufferWidth, uint32 colorBufferHeight, uint32 colorBufferSliceIndex, uint32 colorBufferFormat, uint32 colorBufferPitch, Latte::E_HWTILEMODE colorBufferTilemode, uint32 colorBufferSwizzle, uint32 renderTarget)
@@ -1016,9 +1014,11 @@ void LatteRenderTarget_itHLECopyColorBufferToScanBuffer(MPTR colorBufferPtr, uin
 		return;
 	}
 
-	const bool tabPressed = gui_isKeyDown(WXK_TAB);
-	const bool ctrlPressed = gui_isKeyDown(0xA2); // VK_LCONTROL
+	const bool tabPressed = gui_isKeyDown(PlatformKeyCodes::TAB);
+	const bool ctrlPressed = gui_isKeyDown(PlatformKeyCodes::LCONTROL);
+
 	bool showDRC = swkbd_hasKeyboardInputHook() == false && tabPressed;
+	bool& alwaysDisplayDRC = LatteGPUState.alwaysDisplayDRC;
 
 	if (ctrlPressed && tabPressed)
 	{

@@ -66,6 +66,11 @@ namespace coreinit
 
 	std::unordered_map<OSThread_t*, OSHostThread*> s_threadToFiber;
 
+	bool __CemuIsMulticoreMode()
+	{
+		return g_isMulticoreMode;
+	}
+
 	// create host thread (fiber) that will be used to run the PPC instance
 	// note that host threads are fibers and not actual threads
 	void __OSCreateHostThread(OSThread_t* thread)
@@ -233,7 +238,7 @@ namespace coreinit
 		{
 			// workaround for games that restart threads to quickly
 			// seen in Fast Racing Neo at boot (0x020617BC OSCreateThread)
-			forceLog_printf("Game attempting to re-initialize existing thread");
+			cemuLog_log(LogType::Force, "Game attempting to re-initialize existing thread");
 			while ((thread->state == OSThread_t::THREAD_STATE::STATE_READY || thread->state == OSThread_t::THREAD_STATE::STATE_RUNNING) && thread->suspendCounter == 0)
 			{
 				// wait for thread to finish
@@ -243,7 +248,7 @@ namespace coreinit
 			}
 			if (__OSIsThreadActive(thread) && thread->state == OSThread_t::THREAD_STATE::STATE_MORIBUND)
 			{
-				forceLog_printf("Calling OSCreateThread() on thread which is still active (Thread exited without detached flag). Forcing OSDetachThread()...");
+				cemuLog_log(LogType::Force, "Calling OSCreateThread() on thread which is still active (Thread exited without detached flag). Forcing OSDetachThread()...");
 				__OSUnlockScheduler();
 				OSDetachThread(thread);
 				__OSLockScheduler();
@@ -258,9 +263,7 @@ namespace coreinit
 			thread = (OSThread_t*)memory_getPointerFromVirtualOffset(coreinit_allocFromSysArea(sizeof(OSThread_t), 32));
 		memset(thread, 0x00, sizeof(OSThread_t));
 		// init signatures
-		thread->context.magic0 = OS_CONTEXT_MAGIC_0;
-		thread->context.magic1 = OS_CONTEXT_MAGIC_1;
-		thread->magic = 'tHrD';
+		thread->SetMagic();
 		thread->type = threadType;
 		thread->state = (entryPoint != MPTR_NULL) ? OSThread_t::THREAD_STATE::STATE_READY : OSThread_t::THREAD_STATE::STATE_NONE;
 		thread->entrypoint = _swapEndianU32(entryPoint);
@@ -341,7 +344,7 @@ namespace coreinit
 		if (thread->state != OSThread_t::THREAD_STATE::STATE_NONE && thread->state != OSThread_t::THREAD_STATE::STATE_MORIBUND)
 		{
 			// unsure about this case
-			forceLogDebug_printf("OSRunThread called on thread which cannot be ran");
+			cemuLog_logDebug(LogType::Force, "OSRunThread called on thread which cannot be ran");
 			__OSUnlockScheduler();
 			return false;
 		}
@@ -402,7 +405,7 @@ namespace coreinit
 		// release held synchronization primitives
 		if (!threadBE->mutexQueue.isEmpty())
 		{
-			cemuLog_force("OSExitThread: Thread is holding mutexes");
+			cemuLog_log(LogType::Force, "OSExitThread: Thread is holding mutexes");
 			while (true)
 			{
 				OSMutex* mutex = threadBE->mutexQueue.getFirst();
@@ -410,7 +413,7 @@ namespace coreinit
 					break;
 				if (mutex->owner != threadBE)
 				{
-					cemuLog_force("OSExitThread: Thread is holding mutex which it doesn't own");
+					cemuLog_log(LogType::Force, "OSExitThread: Thread is holding mutex which it doesn't own");
 					threadBE->mutexQueue.removeMutex(mutex);
 					continue;
 				}
@@ -531,7 +534,7 @@ namespace coreinit
 		else if (thread->state != OSThread_t::THREAD_STATE::STATE_MORIBUND)
 		{
 			// cannot join detached and active threads
-			forceLogDebug_printf("Cannot join detached active thread");
+			cemuLog_logDebug(LogType::Force, "Cannot join detached active thread");
 			__OSUnlockScheduler();
 			return false;
 		}
@@ -558,7 +561,10 @@ namespace coreinit
 	// adds the thread to each core's run queue if in runable state
 	void __OSAddReadyThreadToRunQueue(OSThread_t* thread)
 	{
+        cemu_assert_debug(MMU_IsInPPCMemorySpace(thread));
+        cemu_assert_debug(thread->IsValidMagic());
 		cemu_assert_debug(__OSHasSchedulerLock());
+
 		if (thread->state != OSThread_t::THREAD_STATE::STATE_READY)
 			return;
 		if (thread->suspendCounter != 0)
@@ -666,6 +672,11 @@ namespace coreinit
 		__OSUnlockScheduler();
 	}
 
+    void __OSSuspendThreadNolock(OSThread_t* thread)
+    {
+        __OSSuspendThreadInternal(thread);
+    }
+
 	void OSSleepThread(OSThreadQueue* threadQueue)
 	{
 		__OSLockScheduler();
@@ -693,10 +704,18 @@ namespace coreinit
 		}
 		else if (prevAffinityMask != affinityMask)
 		{
-			__OSRemoveThreadFromRunQueues(thread);
-			thread->attr = (thread->attr & ~7) | (affinityMask & 7);
-			thread->context.setAffinity(affinityMask);
-			__OSAddReadyThreadToRunQueue(thread);
+            if(thread->state != OSThread_t::THREAD_STATE::STATE_NONE)
+            {
+                __OSRemoveThreadFromRunQueues(thread);
+                thread->attr = (thread->attr & ~7) | (affinityMask & 7);
+                thread->context.setAffinity(affinityMask);
+                __OSAddReadyThreadToRunQueue(thread);
+            }
+            else
+            {
+                thread->attr = (thread->attr & ~7) | (affinityMask & 7);
+                thread->context.setAffinity(affinityMask);
+            }
 		}
 		__OSUnlockScheduler();
 		return true;
@@ -793,7 +812,22 @@ namespace coreinit
 		return suspendCounter > 0;
 	}
 
-	void OSCancelThread(OSThread_t* thread)
+    bool OSIsThreadRunningNoLock(OSThread_t* thread)
+    {
+        cemu_assert_debug(__OSHasSchedulerLock());
+        return thread->state == OSThread_t::THREAD_STATE::STATE_RUNNING;
+    }
+
+    bool OSIsThreadRunning(OSThread_t* thread)
+    {
+        bool isRunning = false;
+        __OSLockScheduler();
+        isRunning = OSIsThreadRunningNoLock(thread);
+        __OSUnlockScheduler();
+        return isRunning;
+    }
+
+    void OSCancelThread(OSThread_t* thread)
 	{
 		__OSLockScheduler();
 		cemu_assert_debug(thread->requestFlags == 0 || thread->requestFlags == OSThread_t::REQUEST_FLAG_CANCEL); // todo - how to handle cases where other flags are already set?
@@ -941,6 +975,22 @@ namespace coreinit
 		thread->wakeUpCount = thread->wakeUpCount + 1;
 	}
 
+	uint32 s_lehmer_lcg[PPC_CORE_COUNT] = { 0 };
+
+	void __OSThreadStartTimeslice(OSThread_t* thread, PPCInterpreter_t* hCPU)
+	{
+		uint32 coreIndex = PPCInterpreter_getCoreIndex(hCPU);
+		// run one timeslice
+		hCPU->remainingCycles = ppcThreadQuantum;
+		hCPU->skippedCycles = 0;
+		// we add a slight randomized variance to the thread quantum to avoid getting stuck in repeated code sequences where one or multiple threads always unload inside a lock
+		// this was seen in Mario Party 10 during early boot where several OSLockMutex operations would align in such a way that one thread would never successfully acquire the lock
+		if (s_lehmer_lcg[coreIndex] == 0)
+			s_lehmer_lcg[coreIndex] = 12345;
+		hCPU->remainingCycles += (s_lehmer_lcg[coreIndex] & 0x7F);
+		s_lehmer_lcg[coreIndex] = (uint32)((uint64)s_lehmer_lcg[coreIndex] * 279470273ull % 0xfffffffbull);
+	}
+
 	OSThread_t* __OSGetNextRunableThread(uint32 coreIndex)
 	{
 		cemu_assert_debug(__OSHasSchedulerLock());
@@ -1067,31 +1117,25 @@ namespace coreinit
 		cemu_assert_debug(__OSHasSchedulerLock());	
 		cemu_assert_debug(g_isMulticoreMode == false || hostThread->selectedCore == t_assignedCoreIndex);
 
-		// load self thread
+		// received next time slice, load self again
 		__OSLoadThread(hostThread->m_thread, &hostThread->ppcInstance, hostThread->selectedCore);
+		__OSThreadStartTimeslice(hostThread->m_thread, &hostThread->ppcInstance);
 	}
 
 	void __OSFiberThreadEntry(void* _thread)
 	{
 		OSHostThread* hostThread = (OSHostThread*)_thread;
 
+        #if defined(ARCH_X86_64)
 		_mm_setcsr(_mm_getcsr() | 0x8000); // flush denormals to zero
-
-		uint32 lehmer_lcg = 12345;
+        #endif
 
 		PPCInterpreter_t* hCPU = &hostThread->ppcInstance;
 		__OSLoadThread(hostThread->m_thread, hCPU, hostThread->selectedCore);
+		__OSThreadStartTimeslice(hostThread->m_thread, &hostThread->ppcInstance);
 		__OSUnlockScheduler(); // lock is always held when switching to a fiber, so we need to unlock it here
 		while (true)
 		{
-			// run one timeslice
-			hCPU->remainingCycles = ppcThreadQuantum;
-			hCPU->skippedCycles = 0;
-			// we add a slight randomized variance to the thread quantum to avoid getting stuck in repeated code sequences where the duration matches the thread quantum perfectly
-			// this was seen in Mario Party 10 on launch where several OSLockMutex operations would align in such a way that one thread would never successfully acquire the lock
-			hCPU->remainingCycles += (lehmer_lcg & 0x7F);
-			lehmer_lcg = (uint32)((uint64)lehmer_lcg * 279470273ull % 0xfffffffbull);
-
 			if (hCPU->remainingCycles > 0)
 			{
 				// try to enter recompiler immediately
@@ -1116,7 +1160,9 @@ namespace coreinit
 	{
 		SetThreadName(fmt::format("OSSchedulerThread[core={}]", (uintptr_t)_assignedCoreIndex).c_str());
 		t_assignedCoreIndex = (sint32)(uintptr_t)_assignedCoreIndex;
+        #if defined(ARCH_X86_64)
 		_mm_setcsr(_mm_getcsr() | 0x8000); // flush denormals to zero
+        #endif
 		t_schedulerFiber = Fiber::PrepareCurrentThread();
 		
 		// create scheduler idle fiber and switch to it
@@ -1306,6 +1352,7 @@ namespace coreinit
 		cafeExportRegister("coreinit", OSResumeThread, LogType::CoreinitThread);
 		cafeExportRegister("coreinit", OSContinueThread, LogType::CoreinitThread);
 		cafeExportRegister("coreinit", OSSuspendThread, LogType::CoreinitThread);
+		cafeExportRegister("coreinit", __OSSuspendThreadNolock, LogType::CoreinitThread);
 		cafeExportRegister("coreinit", OSSleepThread, LogType::CoreinitThread);
 		cafeExportRegister("coreinit", OSWakeupThread, LogType::CoreinitThread);
 

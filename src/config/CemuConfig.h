@@ -115,11 +115,10 @@ ENABLE_ENUM_ITERATORS(PrecompiledShaderOption, PrecompiledShaderOption::Auto, Pr
 
 enum class AccurateShaderMulOption
 {
-	False = 0, // ignore non-ieee MUL special cases
-	True = 1, // fully emulate non-ieee MUL special cases
-	Min = 2, // similar to true, but avoids conditionals (instead relies on min() and abs())
+	False = 0, // always use standard multiplication
+	True = 1 // fully emulate non-ieee MUL special cases (0*anything = 0)
 };
-ENABLE_ENUM_ITERATORS(AccurateShaderMulOption, AccurateShaderMulOption::False, AccurateShaderMulOption::Min);
+ENABLE_ENUM_ITERATORS(AccurateShaderMulOption, AccurateShaderMulOption::False, AccurateShaderMulOption::True);
 
 enum class CPUMode
 {
@@ -213,7 +212,6 @@ struct fmt::formatter<AccurateShaderMulOption> : formatter<string_view> {
 		{
 		case AccurateShaderMulOption::True: name = "true"; break;
 		case AccurateShaderMulOption::False: name = "false"; break;
-		case AccurateShaderMulOption::Min: name = "min"; break;
 		default: name = "unknown"; break;
 		}
 		return formatter<string_view>::format(name, ctx);
@@ -356,7 +354,7 @@ struct CemuConfig
 	//
 
 	// sets mlc path, updates permanent config value, saves config
-	void SetMLCPath(std::wstring_view path, bool save = true);
+	void SetMLCPath(fs::path path, bool save = true);
 
 	ConfigValue<uint64> log_flag{ 0 };
 	ConfigValue<bool> advanced_ppc_logging{ false };
@@ -365,10 +363,20 @@ struct CemuConfig
 	
 	ConfigValue<sint32> language{ wxLANGUAGE_DEFAULT };
 	ConfigValue<bool> use_discord_presence{ true };
-	ConfigValue<std::wstring> mlc_path {};
+	ConfigValue<std::string> mlc_path {};
 	ConfigValue<bool> fullscreen_menubar{ false };
 	ConfigValue<bool> fullscreen{ false };
+    	ConfigValue<bool> feral_gamemode{false};
 	ConfigValue<std::string> proxy_server{};
+
+	// temporary workaround because feature crashes on macOS
+#if BOOST_OS_MACOS
+#define DISABLE_SCREENSAVER_DEFAULT false
+#else
+#define DISABLE_SCREENSAVER_DEFAULT true
+#endif
+	ConfigValue<bool> disable_screensaver{DISABLE_SCREENSAVER_DEFAULT};
+#undef DISABLE_SCREENSAVER_DEFAULT
 
 	std::vector<std::wstring> game_paths;
 	std::mutex game_cache_entries_mutex;
@@ -407,6 +415,7 @@ struct CemuConfig
 
 	ConfigValue<bool> did_show_vulkan_warning{false};
 	ConfigValue<bool> did_show_graphic_pack_download{false};
+	ConfigValue<bool> did_show_macos_disclaimer{false};
 
 	int game_list_style = 0;
 	std::string game_list_column_order;
@@ -462,9 +471,9 @@ struct CemuConfig
 	// audio
 	sint32 audio_api = 0;
 	sint32 audio_delay = 2;
-	AudioChannels tv_channels = kStereo, pad_channels = kStereo;
-	sint32 tv_volume = 50, pad_volume = 0;
-	std::wstring tv_device{ L"default" }, pad_device;
+	AudioChannels tv_channels = kStereo, pad_channels = kStereo, input_channels = kMono;
+	sint32 tv_volume = 50, pad_volume = 0, input_volume = 50;
+	std::wstring tv_device{ L"default" }, pad_device, input_device;
 
 	// account
 	struct
@@ -483,6 +492,7 @@ struct CemuConfig
 
 	// debug
 	ConfigValueBounds<CrashDump> crash_dump{ CrashDump::Disabled };
+	ConfigValue<uint16> gdb_port{ 1337 };
 
 	void Load(XMLConfigParser& parser);
 	void Save(XMLConfigParser& parser);

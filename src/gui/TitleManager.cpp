@@ -367,7 +367,7 @@ void TitleManager::OnRefreshButton(wxCommandEvent& event)
 void TitleManager::OnInstallTitle(wxCommandEvent& event)
 {
 	wxFileDialog openFileDialog(this, _("Select title to install"), "", "", "meta.xml|meta.xml", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
-	if (openFileDialog.ShowModal() == wxID_CANCEL)
+	if (openFileDialog.ShowModal() == wxID_CANCEL || openFileDialog.GetPath().IsEmpty())
 		return;
 
 	fs::path filePath(openFileDialog.GetPath().wc_str());
@@ -417,10 +417,12 @@ static void PopulateSavePersistentIds(wxTitleManagerList::TitleEntry& entry)
 	{
 		if(!it.is_directory(ec))
 			continue;
+		if(fs::is_empty(it.path()))
+			continue;
 		std::string dirName = it.path().filename().string();
-		uint32 persistentId = ConvertString<uint32>(dirName, 16);
-		if (persistentId != 0)
-			entry.persistent_ids.emplace_back(persistentId);
+		if(!std::regex_match(dirName, std::regex("[0-9a-fA-F]{8}")))
+			continue;
+		entry.persistent_ids.emplace_back(ConvertString<uint32>(dirName, 16));
 	}
 }
 
@@ -533,7 +535,7 @@ void TitleManager::OnSaveDelete(wxCommandEvent& event)
 	}
 
 	if (!meta_file_edited)
-		forceLog_printf("TitleManager::OnSaveDelete: couldn't delete save entry in saveinfo.xml: %s", saveinfo.generic_u8string().c_str());
+		cemuLog_log(LogType::Force, "TitleManager::OnSaveDelete: couldn't delete save entry in saveinfo.xml: {}", _pathToUtf8(saveinfo));
 
 	// remove from title entry
 	auto& persistent_ids = entry->persistent_ids;
@@ -621,13 +623,10 @@ void TitleManager::OnSaveExport(wxCommandEvent& event)
 	const auto persistent_id = (uint32)(uintptr_t)m_save_account_list->GetClientData(selection_index);
 
 	wxFileDialog path_dialog(this, _("Select a target file to export the save entry"), entry->path.string(), wxEmptyString, "Exported save entry (*.zip)|*.zip", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
-	if (path_dialog.ShowModal() != wxID_OK)
+	if (path_dialog.ShowModal() != wxID_OK || path_dialog.GetPath().IsEmpty())
 		return;
 
 	const auto path = path_dialog.GetPath();
-	if (path.empty())
-		return;
-
 	int ze;
 	auto* zip = zip_open(path.ToUTF8().data(), ZIP_CREATE | ZIP_TRUNCATE, &ze);
 	if (!zip)

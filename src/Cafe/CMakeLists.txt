@@ -38,6 +38,9 @@ add_library(CemuCafe
   HW/Espresso/Debugger/Debugger.h
   HW/Espresso/Debugger/DebugSymbolStorage.cpp
   HW/Espresso/Debugger/DebugSymbolStorage.h
+  HW/Espresso/Debugger/GDBStub.h
+  HW/Espresso/Debugger/GDBStub.cpp
+  HW/Espresso/Debugger/GDBBreakpoints.h
   HW/Espresso/EspressoISA.h
   HW/Espresso/Interpreter/PPCInterpreterALU.hpp
   HW/Espresso/Interpreter/PPCInterpreterFPU.cpp
@@ -178,6 +181,8 @@ add_library(CemuCafe
   HW/Latte/Renderer/Vulkan/LatteTextureVk.h
   HW/Latte/Renderer/Vulkan/RendererShaderVk.cpp
   HW/Latte/Renderer/Vulkan/RendererShaderVk.h
+  HW/Latte/Renderer/Vulkan/SwapchainInfoVk.cpp
+  HW/Latte/Renderer/Vulkan/SwapchainInfoVk.h
   HW/Latte/Renderer/Vulkan/TextureReadbackVk.cpp
   HW/Latte/Renderer/Vulkan/VKRBase.h
   HW/Latte/Renderer/Vulkan/VKRMemoryManager.cpp
@@ -401,6 +406,16 @@ add_library(CemuCafe
   OS/libs/nn_nim/nn_nim.h
   OS/libs/nn_olv/nn_olv.cpp
   OS/libs/nn_olv/nn_olv.h
+  OS/libs/nn_olv/nn_olv_Common.cpp
+  OS/libs/nn_olv/nn_olv_Common.h
+  OS/libs/nn_olv/nn_olv_InitializeTypes.cpp
+  OS/libs/nn_olv/nn_olv_InitializeTypes.h
+  OS/libs/nn_olv/nn_olv_DownloadCommunityTypes.cpp
+  OS/libs/nn_olv/nn_olv_DownloadCommunityTypes.h
+  OS/libs/nn_olv/nn_olv_UploadCommunityTypes.cpp
+  OS/libs/nn_olv/nn_olv_UploadCommunityTypes.h
+  OS/libs/nn_olv/nn_olv_UploadFavoriteTypes.cpp
+  OS/libs/nn_olv/nn_olv_UploadFavoriteTypes.h
   OS/libs/nn_pdm/nn_pdm.cpp
   OS/libs/nn_pdm/nn_pdm.h
   OS/libs/nn_save/nn_save.cpp
@@ -452,8 +467,6 @@ add_library(CemuCafe
   TitleList/BaseInfo.cpp
   TitleList/BaseInfo.h
   TitleList/GameInfo.h
-  TitleList/MetaInfo.cpp
-  TitleList/MetaInfo.h
   TitleList/ParsedMetaXml.h
   TitleList/SaveInfo.cpp
   TitleList/SaveInfo.h
@@ -499,6 +512,11 @@ target_link_libraries(CemuCafe PRIVATE
 	ZLIB::ZLIB
 	zstd::zstd
 )
+
+if (ENABLE_WAYLAND)
+	# PUBLIC because wayland-client.h is included in VulkanAPI.h
+  target_link_libraries(CemuCafe PUBLIC Wayland::Client)
+endif()
 
 if (ENABLE_WXWIDGETS)
 	target_link_libraries(CemuCafe PRIVATE wx::base wx::core)

@@ -355,7 +355,7 @@ namespace H264
 				uint32 numByteConsumed = 0;
 				if (!DetermineBufferSizes(data, length, numByteConsumed))
 				{
-					cemuLog_force("H264: Unable to determine picture size. Ignoring decode input");
+					cemuLog_log(LogType::Force, "H264: Unable to determine picture size. Ignoring decode input");
 					decodeResult.frameReady = false;
 					return;
 				}
@@ -397,7 +397,7 @@ namespace H264
 			}
 			else if (status != 0)
 			{
-				cemuLog_force("H264: Failed to decode frame (error 0x{:08x})", status);
+				cemuLog_log(LogType::Force, "H264: Failed to decode frame (error 0x{:08x})", status);
 				decodeResult.frameReady = false;
 				return;
 			}
@@ -577,7 +577,7 @@ namespace H264
 			WORD32 status = ih264d_api_function(m_codecCtx, &s_dec_ip, &s_dec_op);
 			if (status != 0)
 			{
-				forceLog_printf("H264: Unable to determine buffer sizes for stream");
+				cemuLog_log(LogType::Force, "H264: Unable to determine buffer sizes for stream");
 				return false;
 			}
 			numByteConsumed = s_dec_op.u4_num_bytes_consumed;
@@ -901,7 +901,7 @@ namespace H264
 		}
 		else
 		{
-			cemuLog_force("h264Export_H264DECSetParam(): Unsupported parameterId 0x{:08x}\n", paramId);
+			cemuLog_log(LogType::Force, "h264Export_H264DECSetParam(): Unsupported parameterId 0x{:08x}\n", paramId);
 			cemu_assert_unimplemented();
 		}
 		return H264DEC_STATUS::SUCCESS;
@@ -1105,7 +1105,7 @@ namespace H264
 				// end of sequence
 				break;
 			default:
-				forceLogDebug_printf("Unsupported NAL unit type %d", nal_unit_type);
+				cemuLog_logDebug(LogType::Force, "Unsupported NAL unit type {}", nal_unit_type);
 				cemu_assert_unimplemented();
 				// todo
 				break;

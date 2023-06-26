@@ -10,6 +10,8 @@
 #include "Cafe/CafeSystem.h"
 #include "Cafe/TitleList/TitleList.h"
 
+#include "wxHelper.h"
+
 #if BOOST_OS_LINUX || BOOST_OS_MACOS
 #include "resource/embedded/resources.h"
 #endif
@@ -89,10 +91,10 @@ void GraphicPacksWindow2::FillGraphicPackList() const
 			const auto parent_node = node;
 			if (i < (tokens.size() - 1))
 			{
-				node = FindTreeItem(parent_node, wxString(token.data(), token.length()));
+				node = FindTreeItem(parent_node, wxHelper::FromUtf8(token));
 				if (!node.IsOk())
 				{
-					node = m_graphic_pack_tree->AppendItem(parent_node, wxString(token.data(), token.length()));
+					node = m_graphic_pack_tree->AppendItem(parent_node, wxHelper::FromUtf8(token));
 				}
 			}
 			else
@@ -101,9 +103,9 @@ void GraphicPacksWindow2::FillGraphicPackList() const
 				// if a node with same name already exists, add a number suffix
 				for (sint32 s = 0; s < 999; s++)
 				{
-					wxString nodeName(token.data(), token.length());
+					wxString nodeName = wxHelper::FromUtf8(token);
 					if (s > 0)
-						nodeName.append(fmt::format(" #{}", s + 1));
+						nodeName.append(wxHelper::FromUtf8(fmt::format(" #{}", s + 1)));
 					
 					node = FindTreeItem(parent_node, nodeName);
 					if (!node.IsOk())
@@ -218,7 +220,7 @@ GraphicPacksWindow2::GraphicPacksWindow2(wxWindow* parent, uint64_t title_id_fil
 		text->Wrap(-1);
 		filter_row->Add(text, 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
 
-		m_filter_text = new wxTextCtrl(left_panel, wxID_ANY, m_filter, wxDefaultPosition, wxDefaultSize, 0);
+		m_filter_text = new wxTextCtrl(left_panel, wxID_ANY, wxHelper::FromUtf8(m_filter), wxDefaultPosition, wxDefaultSize, 0);
 		filter_row->Add(m_filter_text, 0, wxALL | wxEXPAND, 5);
 		m_filter_text->Bind(wxEVT_COMMAND_TEXT_UPDATED, &GraphicPacksWindow2::OnFilterUpdate, this);
 
@@ -386,13 +388,14 @@ void GraphicPacksWindow2::LoadPresetSelections(const GraphicPackPtr& gp)
 		{
 			continue;
 		}
-					
-		wxString label(category.empty() ? _("Active preset") : wxString(category));
+
+		wxString categoryWxStr = wxHelper::FromUtf8(category);
+		wxString label(category.empty() ? _("Active preset") : categoryWxStr);
 		auto* box = new wxStaticBox(m_preset_sizer->GetContainingWindow(), wxID_ANY, label);
 		auto* box_sizer = new wxStaticBoxSizer(box, wxVERTICAL);
 
 		auto* preset = new wxChoice(box, wxID_ANY);
-		preset->SetClientObject(new wxStringClientData(category));
+		preset->SetClientObject(new wxStringClientData(categoryWxStr));
 		preset->Bind(wxEVT_CHOICE, &GraphicPacksWindow2::OnActivePresetChanged, this);
 
 		std::optional<std::string> active_preset;
@@ -400,14 +403,14 @@ void GraphicPacksWindow2::LoadPresetSelections(const GraphicPackPtr& gp)
 		{
 			if (!pentry->visible)
 				continue;
-						
-			preset->AppendString(pentry->name);
+
+			preset->AppendString(wxHelper::FromUtf8(pentry->name));
 			if (pentry->active)
 				active_preset = pentry->name;
 		}
 
 		if (active_preset)
-			preset->SetStringSelection(active_preset.value());
+			preset->SetStringSelection(wxHelper::FromUtf8(active_preset.value()));
 		else if (preset->GetCount() > 0)
 			preset->SetSelection(0);
 					
@@ -439,14 +442,14 @@ void GraphicPacksWindow2::OnTreeSelectionChanged(wxTreeEvent& event)
 			{
 				m_preset_sizer->Clear(true);
 				m_gp_name = gp->GetName();
-				m_graphic_pack_name->SetLabel(m_gp_name);
+				m_graphic_pack_name->SetLabel(wxHelper::FromUtf8(m_gp_name));
 
 				if (gp->GetDescription().empty())
 					m_gp_description = _("This graphic pack has no description");
 				else
 					m_gp_description = gp->GetDescription();
 
-				m_graphic_pack_description->SetLabel(m_gp_description);
+				m_graphic_pack_description->SetLabel(wxHelper::FromUtf8(m_gp_description));
 
 				LoadPresetSelections(gp);
 				
@@ -495,15 +498,14 @@ void GraphicPacksWindow2::OnTreeChoiceChanged(wxTreeEvent& event)
 	auto& graphic_pack = data->GetGraphicPack();
 	graphic_pack->SetEnabled(state);
 
-	bool has_texture_rules = false;
-	if (CafeSystem::IsTitleRunning() && graphic_pack->ContainsTitleId(CafeSystem::GetForegroundTitleId()))
+	bool requiresRestart = graphic_pack->RequiresRestart(true, false);
+	bool isRunning = CafeSystem::IsTitleRunning() && graphic_pack->ContainsTitleId(CafeSystem::GetForegroundTitleId());
+	if (isRunning)
 	{
  		if (state)
 		{
 			GraphicPack2::ActivateGraphicPack(graphic_pack);
-			has_texture_rules = !graphic_pack->GetTextureRules().empty();
-
-			if (!has_texture_rules)
+			if (!requiresRestart)
 			{
 				ReloadPack(graphic_pack);
 				m_graphic_pack_tree->SetItemTextColour(item, 0x009900);
@@ -511,19 +513,16 @@ void GraphicPacksWindow2::OnTreeChoiceChanged(wxTreeEvent& event)
 		}
 		else
 		{
-			has_texture_rules = !graphic_pack->GetTextureRules().empty();
-
-			if (!has_texture_rules)
+			if (!requiresRestart)
 			{
 				DeleteShadersFromRuntimeCache(graphic_pack);
 				m_graphic_pack_tree->SetItemTextColour(item, *wxBLACK);
 			}
-
 			GraphicPack2::DeactivateGraphicPack(graphic_pack);
 		}
 	}
 
-	if (!m_info_bar->IsShown() && has_texture_rules)
+	if (!m_info_bar->IsShown() && (isRunning && requiresRestart))
 		m_info_bar->ShowMessage(_("Restart of Cemu required for changes to take effect"));
 
 	// also change selection to activated gp
@@ -571,8 +570,8 @@ void GraphicPacksWindow2::OnActivePresetChanged(wxCommandEvent& event)
 	wxASSERT(obj);
 	const auto string_data = dynamic_cast<wxStringClientData*>(obj->GetClientObject());
 	wxASSERT(string_data);
-	const auto preset = obj->GetStringSelection().ToStdString();
-	if(m_shown_graphic_pack->SetActivePreset(string_data->GetData().c_str().AsChar(), preset))
+	const auto preset = wxHelper::MakeUTF8(obj->GetStringSelection());
+	if(m_shown_graphic_pack->SetActivePreset(wxHelper::MakeUTF8(string_data->GetData()), preset))
 	{
 		wxWindowUpdateLocker lock(this);
 		ClearPresets();
@@ -583,7 +582,7 @@ void GraphicPacksWindow2::OnActivePresetChanged(wxCommandEvent& event)
 		m_right_panel->Layout();
 	}
 
-	if (m_shown_graphic_pack->GetTextureRules().empty())
+	if (!m_shown_graphic_pack->RequiresRestart(false, true))
 		ReloadPack(m_shown_graphic_pack);
 	else if (!m_info_bar->IsShown())
 		m_info_bar->ShowMessage(_("Restart of Cemu required for changes to take effect"));		
@@ -646,10 +645,10 @@ void GraphicPacksWindow2::OnSizeChanged(wxSizeEvent& event)
 	obj->SetSashPosition((sint32)(m_ratio * width));
 
 	if (!m_gp_name.empty())
-		m_graphic_pack_name->SetLabel(m_gp_name);
+		m_graphic_pack_name->SetLabel(wxHelper::FromUtf8(m_gp_name));
 
 	if (!m_gp_description.empty())
-		m_graphic_pack_description->SetLabel(m_gp_description);
+		m_graphic_pack_description->SetLabel(wxHelper::FromUtf8(m_gp_description));
 
 	m_graphic_pack_name->Wrap(m_graphic_pack_name->GetParent()->GetClientSize().GetWidth() - 10);
 	m_graphic_pack_description->Wrap(m_graphic_pack_description->GetParent()->GetClientSize().GetWidth() - 10);
@@ -669,7 +668,7 @@ void GraphicPacksWindow2::SashPositionChanged(wxEvent& event)
 
 void GraphicPacksWindow2::OnFilterUpdate(wxEvent& event)
 {
-	m_filter = m_filter_text->GetValue();
+	m_filter = wxHelper::MakeUTF8(m_filter_text->GetValue());
 	FillGraphicPackList();
 	event.Skip();
 }

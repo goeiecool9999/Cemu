@@ -168,7 +168,7 @@ void NexFriends::processServerNotification(uint32 notificationType, uint32 pid, 
 	}
 	else if (true)
 	{
-		forceLogDebug_printf("Unsupported friend server notification type 0x%02x", notificationType);
+		cemuLog_logDebug(LogType::Force, "Unsupported friend server notification type 0x{:02x}", notificationType);
 	}
 }
 
@@ -185,7 +185,7 @@ void nexFriends_protocolNotification_processRequest(nexServiceRequest_t* request
 			request->nex->sendRequestResponse(request, 0, nullptr, 0);
 			return;
 		}
-		forceLogDebug_printf("NN_NOTIFICATION methodId %d type %02x pid %08x", request->methodId, notificationType, pid);
+		cemuLog_logDebug(LogType::Force, "NN_NOTIFICATION methodId {} type {:02x} pid {:08x}", request->methodId, notificationType, pid);
 		nexFriends->processServerNotification(notificationType, pid, &request->data);
 		request->nex->sendRequestResponse(request, 0, nullptr, 0);
 		return;
@@ -260,7 +260,7 @@ void NexFriends::initiateLogin()
 	previousState.list_friendReqOutgoing.resize(0);
 	this->hasData = false;
 	// start login attempt
-	forceLogDebug_printf("Attempt to log into friend server...");
+	cemuLog_logDebug(LogType::Force, "Attempt to log into friend server...");
 	std::thread t(&NexFriends::doAsyncLogin, this);
 	t.detach();
 }
@@ -335,7 +335,7 @@ void NexFriends::handleResponse_getAllInformation(nexServiceResponse_t* response
 	uint8 isPreferenceInvalid = response->data.readU8(); // if not zero, preferences must be setup
 	if (isPreferenceInvalid)
 	{
-		forceLog_printf("NEX: First time login into friend account, setting up default preferences");
+		cemuLog_log(LogType::Force, "NEX: First time login into friend account, setting up default preferences");
 		session->updatePreferences(nexPrincipalPreference(1, 1, 0));
 	}
 
@@ -972,7 +972,7 @@ void NexFriends::update()
 			}
 			if (timeSinceLastLoginAttempt < delayTime)
 				return;
-			forceLog_printf("NEX: Attempt async friend service login");
+			cemuLog_log(LogType::Force, "NEX: Attempt async friend service login");
 			initiateLogin();
 		}
 	}
@@ -980,7 +980,7 @@ void NexFriends::update()
 	{
 		if (this->nexCon == nullptr || this->nexCon->getState() != nexService::STATE_CONNECTED)
 		{
-			forceLog_printf("NEX: Lost friend server session");
+			cemuLog_log(LogType::Force, "NEX: Lost friend server session");
 			if (this->nexCon)
 			{
 				this->nexCon->destroy();

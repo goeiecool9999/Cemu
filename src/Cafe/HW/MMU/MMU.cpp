@@ -293,11 +293,6 @@ uint8* memory_getPointerFromVirtualOffsetAllowNull(uint32 virtualOffset)
 	return memory_getPointerFromVirtualOffset(virtualOffset);
 }
 
-void memory_writeU32Direct(uint32 address, uint32 v)
-{
-	*(uint32*)(memory_getPointerFromVirtualOffset(address)) = CPU_swapEndianU32(v);
-}
-
 // write access
 void memory_writeDouble(uint32 address, double vf)
 {
@@ -318,12 +313,6 @@ void memory_writeFloat(uint32 address, float vf)
 void memory_writeU32(uint32 address, uint32 v)
 {
 	*(uint32*)(memory_getPointerFromVirtualOffset(address)) = CPU_swapEndianU32(v);
-}
-
-void memory_writeU64Slow(uint32 address, uint64 v)
-{
-	memory_writeU32(address+0, (v>>32)&0xFFFFFFFF);
-	memory_writeU32(address+4, (v)&0xFFFFFFFF);
 }
 
 void memory_writeU64(uint32 address, uint64 v)
@@ -367,12 +356,6 @@ uint64 memory_readU64(uint32 address)
 }
 
 uint32 memory_readU32(uint32 address)
-{
-	uint32 v = *(uint32*)(memory_getPointerFromVirtualOffset(address));
-	return CPU_swapEndianU32(v);
-}
-
-uint32 memory_readU32Direct(uint32 address)
 {
 	uint32 v = *(uint32*)(memory_getPointerFromVirtualOffset(address));
 	return CPU_swapEndianU32(v);
@@ -487,7 +470,7 @@ namespace MMU
 		auto itr = g_mmioHandlerW32->find(address);
 		if (itr == g_mmioHandlerW32->end())
 		{
-			//forceLogDebug_printf("[MMU] MMIO write u32 0x%08x from unhandeled address 0x%08x", value, address);
+			//cemuLog_logDebug(LogType::Force, "[MMU] MMIO write u32 0x{:08x} from unhandled address 0x{:08x}", value, address);
 			return;
 		}
 		return itr->second(address, value);
@@ -499,7 +482,7 @@ namespace MMU
 		auto itr = g_mmioHandlerW16->find(address);
 		if (itr == g_mmioHandlerW16->end())
 		{
-			//forceLogDebug_printf("[MMU] MMIO write u16 0x%04x from unhandeled address 0x%08x", (uint32)value, address);
+			//cemuLog_logDebug(LogType::Force, "[MMU] MMIO write u16 0x{:04x} from unhandled address 0x{:08x}", (uint32)value, address);
 			return;
 		}
 		return itr->second(address, value);
@@ -514,7 +497,7 @@ namespace MMU
 		auto itr = g_mmioHandlerR32->find(address);
 		if(itr == g_mmioHandlerR32->end())
 		{
-			//forceLogDebug_printf("[MMU] MMIO read u32 from unhandeled address 0x%08x", address);
+			//cemuLog_logDebug(LogType::Force, "[MMU] MMIO read u32 from unhandled address 0x{:08x}", address);
 			return 0;
 		}
 		return itr->second(address);
@@ -526,7 +509,7 @@ namespace MMU
 		auto itr = g_mmioHandlerR16->find(address);
 		if (itr == g_mmioHandlerR16->end())
 		{
-			//forceLogDebug_printf("[MMU] MMIO read u16 from unhandeled address 0x%08x", address);
+			//cemuLog_logDebug(LogType::Force, "[MMU] MMIO read u16 from unhandled address 0x{:08x}", address);
 			return 0;
 		}
 		return itr->second(address);

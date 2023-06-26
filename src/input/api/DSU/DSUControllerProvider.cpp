@@ -78,7 +78,8 @@ bool DSUControllerProvider::connect()
 		using namespace boost::asio;
 
 		ip::udp::resolver resolver(m_io_service);
-		const ip::udp::resolver::query query(ip::udp::v4(), get_settings().ip, fmt::format("{}", get_settings().port));
+		const ip::udp::resolver::query query(ip::udp::v4(), get_settings().ip, fmt::format("{}", get_settings().port),
+		                                     ip::udp::resolver::query::canonical_name);
 		m_receiver_endpoint = *resolver.resolve(query);
 
 		if (m_socket.is_open())
@@ -102,7 +103,7 @@ bool DSUControllerProvider::connect()
 	}
 	catch (const std::exception& ex)
 	{
-		forceLog_printf("dsu client connect error: %s", ex.what());
+		cemuLog_log(LogType::Force, "dsu client connect error: {}", ex.what());
 		return false;
 	}
 }

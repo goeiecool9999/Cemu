@@ -1,32 +1,27 @@
-#include "config/ActiveSettings.h"
-
 #include "Cafe/GameProfile/GameProfile.h"
-#include "Cemu/Logging/CemuLogging.h"
-#include "LaunchSettings.h"
-#include "util/helpers/helpers.h"
-
-#include <boost/dll/runtime_symbol_info.hpp>
-
 #include "Cafe/IOSU/legacy/iosu_crypto.h"
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanAPI.h"
 #include "Cafe/CafeSystem.h"
-
-extern bool alwaysDisplayDRC;
+#include "Cemu/Logging/CemuLogging.h"
+#include "config/ActiveSettings.h"
+#include "config/LaunchSettings.h"
+#include "util/helpers/helpers.h"
 
 std::set<fs::path>
-ActiveSettings::LoadOnce(const fs::path& user_data_path,
-						 const fs::path& config_path,
-						 const fs::path& cache_path,
-						 const fs::path& data_path)
+ActiveSettings::LoadOnce(
+	const fs::path& executablePath,
+	const fs::path& userDataPath,
+	const fs::path& configPath,
+	const fs::path& cachePath,
+	const fs::path& dataPath)
 {
-	s_full_path = boost::dll::program_location().generic_wstring();
-
-	s_user_data_path = user_data_path;
-	s_config_path = config_path;
-	s_cache_path = cache_path;
-	s_data_path = data_path;
+	s_executable_path = executablePath;
+	s_user_data_path = userDataPath;
+	s_config_path = configPath;
+	s_cache_path = cachePath;
+	s_data_path = dataPath;
 	std::set<fs::path> failed_write_access;
-	for (auto&& path : {user_data_path, config_path, cache_path})
+	for (auto&& path : {userDataPath, configPath, cachePath})
 	{
 		if (!fs::exists(path))
 		{
@@ -35,12 +30,12 @@ ActiveSettings::LoadOnce(const fs::path& user_data_path,
 		}
 		if (!TestWriteAccess(path))
 		{
-			cemuLog_log(LogType::Force, "Failed to write to {}", path.generic_string());
+			cemuLog_log(LogType::Force, "Failed to write to {}", _pathToUtf8(path));
 			failed_write_access.insert(path);
 		}
 	}
 
-	s_filename = s_full_path.filename();
+	s_executable_filename = s_executable_path.filename();
 
 	g_config.SetFilename(GetConfigPath("settings.xml").generic_wstring());
 	g_config.Load();
@@ -57,7 +52,6 @@ bool ActiveSettings::LoadSharedLibrariesEnabled()
 
 bool ActiveSettings::DisplayDRCEnabled()
 {
-	alwaysDisplayDRC = g_current_game_profile->StartWithGamepadView();
 	return g_current_game_profile->StartWithGamepadView();
 }
 
@@ -180,16 +174,6 @@ void ActiveSettings::EnableDumpLibcurlRequests(bool state)
 	s_dump_libcurl_requests = state;
 }
 
-bool ActiveSettings::FrameProfilerEnabled()
-{
-	return s_frame_profiler_enabled;
-}
-
-void ActiveSettings::EnableFrameProfiler(bool state)
-{
-	s_frame_profiler_enabled = state;
-}
-
 bool ActiveSettings::VPADDelayEnabled()
 {
 	const uint64 titleId = CafeSystem::GetForegroundTitleId();
@@ -244,7 +228,7 @@ fs::path ActiveSettings::GetMlcPath()
 		return launch_mlc.value();
 
 	if(const auto config_mlc = GetConfig().mlc_path.GetValue(); !config_mlc.empty())
-		return config_mlc;
+		return _utf8ToPath(config_mlc);
 
 	return GetDefaultMLCPath();
 }

@@ -304,7 +304,7 @@ public:
 	{
 		if ((rangeBegin & 0xF))
 		{
-			forceLogDebug_printf("writeStreamout(): RangeBegin not aligned to 16. Begin %08x End %08x", rangeBegin, rangeEnd);
+			cemuLog_logDebug(LogType::Force, "writeStreamout(): RangeBegin not aligned to 16. Begin {:08x} End {:08x}", rangeBegin, rangeEnd);
 			rangeBegin = (rangeBegin + 0xF) & ~0xF;
 			rangeEnd = std::max(rangeBegin, rangeEnd);
 		}
@@ -313,7 +313,7 @@ public:
 			// todo - add support for 4 byte granularity for streamout writes and cache
 			// used by Affordable Space Adventures and YWW Level 1-8
 			// also used by CoD Ghosts (8 byte granularity)
-			//forceLogDebug_printf("Streamout write size is not aligned to 16 bytes");
+			//cemuLog_logDebug(LogType::Force, "Streamout write size is not aligned to 16 bytes");
 			rangeEnd &= ~0xF;
 		}
 		//cemu_assert_debug((rangeEnd & 0xF) == 0);
@@ -734,20 +734,34 @@ private:
 
 	static uint64 hashPage(uint8* mem)
 	{
-		// note - this algorithm is/was also baked into pageWriteStreamoutSignatures()
-		uint64 h = 0;
-		uint64* memU64 = (uint64*)mem;
-		for (uint32 i = 0; i < CACHE_PAGE_SIZE / 8; i++)
-		{
-			//h = _rotr64(h, 7);
-			//h ^= *memU64;
-			//memU64++;
+		static const uint64 k0 = 0x55F23EAD;
+		static const uint64 k1 = 0x185FDC6D;
+		static const uint64 k2 = 0xF7431F49;
+		static const uint64 k3 = 0xA4C7AE9D;
 
-			h = std::rotr<uint64>(h, 7);
-			h += (*memU64 + (uint64)i);
-			memU64++;
+		cemu_assert_debug((CACHE_PAGE_SIZE % 32) == 0);
+		const uint64* ptr = (const uint64*)mem;
+		const uint64* end = ptr + (CACHE_PAGE_SIZE / sizeof(uint64));
+
+		uint64 h0 = 0;
+		uint64 h1 = 0;
+		uint64 h2 = 0;
+		uint64 h3 = 0;
+		while (ptr < end)
+		{
+			h0 = std::rotr(h0, 7);
+			h1 = std::rotr(h1, 7);
+			h2 = std::rotr(h2, 7);
+			h3 = std::rotr(h3, 7);
+
+			h0 += ptr[0] * k0;
+			h1 += ptr[1] * k1;
+			h2 += ptr[2] * k2;
+			h3 += ptr[3] * k3;
+			ptr += 4;
 		}
-		return h;
+
+		return h0 + h1 + h2 + h3;
 	}
 
 	// flag page as having streamout data, also write streamout signatures to page memory
@@ -871,11 +885,11 @@ public:
 			// retry allocation
 			if (!newRange->allocateCacheMemory())
 			{
-				forceLog_printf("Out-of-memory in GPU buffer (trying to allocate: %dKB) Cleaning up cache...", (rangeEnd - rangeBegin + 1023) / 1024);
+				cemuLog_log(LogType::Force, "Out-of-memory in GPU buffer (trying to allocate: {}KB) Cleaning up cache...", (rangeEnd - rangeBegin + 1023) / 1024);
 				CleanupCacheAggressive(rangeBegin, rangeEnd);
 				if (!newRange->allocateCacheMemory())
 				{
-					forceLog_printf("Failed to free enough memory in GPU buffer");
+					cemuLog_log(LogType::Force, "Failed to free enough memory in GPU buffer");
 					cemu_assert(false);
 				}
 			}
@@ -907,7 +921,7 @@ public:
 		// todo - add support for splitting BufferCacheNode memory allocations, then we dont need to do a separate allocation
 		if (!newRange->allocateCacheMemory())
 		{
-			forceLog_printf("Out-of-memory in GPU buffer during split operation");
+			cemuLog_log(LogType::Force, "Out-of-memory in GPU buffer during split operation");
 			cemu_assert(false);
 		}
 		newRange->syncFromNode(nodeObject);

@@ -156,6 +156,12 @@ void wxTitleManagerList::AddColumns()
 	col5.SetText(_("Format"));
 	col5.SetWidth(63);
 	InsertColumn(ColumnFormat, col5);
+
+	wxListItem col6;
+	col6.SetId(ColumnLocation);
+	col6.SetText(_("Location"));
+	col6.SetWidth(63);
+	InsertColumn(ColumnLocation, col6);
 }
 
 wxString wxTitleManagerList::OnGetItemText(long item, long column) const
@@ -172,10 +178,11 @@ wxString wxTitleManagerList::OnGetItemText(long item, long column) const
 
 wxItemAttr* wxTitleManagerList::OnGetItemAttr(long item) const
 {
-	const auto entry = GetTitleEntry(item);
-	const wxColour kSecondColor{ 0xFDF9F2 };
-	static wxListItemAttr s_coloured_attr(GetTextColour(), kSecondColor, GetFont());
-	return item % 2 == 0 ? nullptr : &s_coloured_attr;
+	static wxColour bgColourPrimary = GetBackgroundColour();
+	static wxColour bgColourSecondary = wxHelper::CalculateAccentColour(bgColourPrimary);
+	static wxListItemAttr s_primary_attr(GetTextColour(), bgColourPrimary, GetFont());
+	static wxListItemAttr s_secondary_attr(GetTextColour(), bgColourSecondary, GetFont());
+	return item % 2 == 0 ? &s_primary_attr : &s_secondary_attr;
 }
 
 boost::optional<wxTitleManagerList::TitleEntry&> wxTitleManagerList::GetTitleEntry(long item)
@@ -368,7 +375,7 @@ void wxTitleManagerList::OnConvertToCompressedFormat(uint64 titleId)
 	// ask the user to provide a path for the output file
 	wxFileDialog saveFileDialog(this, _("Save Wii U game archive file"), defaultDir, wxHelper::FromUtf8(defaultFileName),
 			"WUA files (*.wua)|*.wua", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
-	if (saveFileDialog.ShowModal() == wxID_CANCEL)
+	if (saveFileDialog.ShowModal() == wxID_CANCEL || saveFileDialog.GetPath().IsEmpty())
 		return;
 	fs::path outputPath(wxHelper::MakeFSPath(saveFileDialog.GetPath()));
 	fs::path outputPathTmp(wxHelper::MakeFSPath(saveFileDialog.GetPath().append("__tmp")));
@@ -868,7 +875,7 @@ void wxTitleManagerList::OnContextMenuSelected(wxCommandEvent& event)
 			}
 			catch (const std::exception& ex)
 			{
-				forceLog_printf("wxTitleManagerList::OnContextMenuSelected: can't launch title: %s", ex.what());
+				cemuLog_log(LogType::Force, "wxTitleManagerList::OnContextMenuSelected: can't launch title: {}", ex.what());
 			}
 		}
 		break;
@@ -933,6 +940,16 @@ wxString wxTitleManagerList::GetTitleEntryText(const TitleEntry& entry, ItemColu
 		}
 		return "";
 		//return wxStringFormat2("{}", entry.format);
+	}
+	case ColumnLocation:
+	{
+		const auto relative_mlc_path = 
+			entry.path.lexically_relative(ActiveSettings::GetMlcPath()).string();
+
+		if (relative_mlc_path.starts_with("usr") || relative_mlc_path.starts_with("sys"))
+			return _("MLC");
+		else
+			return _("Game Paths");
 	}
 	default:
 		UNREACHABLE;

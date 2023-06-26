@@ -23,6 +23,8 @@
 #endif
 #include "audio/CubebAPI.h"
 
+#include "audio/IAudioInputAPI.h"
+
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanAPI.h"
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanRenderer.h"
 #include "Cafe/Account/Account.h"
@@ -47,6 +49,8 @@
 #include "Cafe/TitleList/TitleList.h"
 #include "wxHelper.h"
 
+#include "util/ScreenSaver/ScreenSaver.h"
+
 const wxString kDirectSound(wxT("DirectSound"));
 const wxString kXAudio27(wxT("XAudio2.7"));
 const wxString kXAudio2(wxT("XAudio2"));
@@ -68,6 +72,15 @@ public:
 	const IAudioAPI::DeviceDescriptionPtr& GetDescription() const { return m_description; }
 private:
 	IAudioAPI::DeviceDescriptionPtr m_description;
+};
+
+class wxInputDeviceDescription : public wxClientData
+{
+public:
+	wxInputDeviceDescription(const IAudioInputAPI::DeviceDescriptionPtr& description) : m_description(description) {}
+	const IAudioInputAPI::DeviceDescriptionPtr& GetDescription() const { return m_description; }
+private:
+	IAudioInputAPI::DeviceDescriptionPtr m_description;
 };
 
 class wxVulkanUUID : public wxClientData
@@ -142,6 +155,9 @@ wxPanel* GeneralSettings2::AddGeneralPage(wxNotebook* notebook)
 			m_discord_presence = new wxCheckBox(box, wxID_ANY, _("Discord Presence"));
 			m_discord_presence->SetToolTip(_("Enables the Discord Rich Presence feature\nYou will also need to enable it in the Discord settings itself!"));
 			second_row->Add(m_discord_presence, 0, botflag, 5);
+#ifndef ENABLE_DISCORD_RPC
+			m_discord_presence->Disable();
+#endif
 			second_row->AddSpacer(10);
 			m_fullscreen_menubar = new wxCheckBox(box, wxID_ANY, _("Fullscreen menu bar"));
 			m_fullscreen_menubar->SetToolTip(_("Displays the menu bar when Cemu is running in fullscreen mode and the mouse cursor is moved to the top"));
@@ -158,6 +174,22 @@ wxPanel* GeneralSettings2::AddGeneralPage(wxNotebook* notebook)
 			m_permanent_storage = new wxCheckBox(box, wxID_ANY, _("Use permanent storage"));
 			m_permanent_storage->SetToolTip(_("Cemu will remember your custom mlc path in %LOCALAPPDATA%/Cemu for new installations."));
 			second_row->Add(m_permanent_storage, 0, botflag, 5);
+			second_row->AddSpacer(10);
+			m_disable_screensaver = new wxCheckBox(box, wxID_ANY, _("Disable screen saver"));
+			m_disable_screensaver->SetToolTip(_("Prevents the system from activating the screen saver or going to sleep while running a game."));
+			second_row->Add(m_disable_screensaver, 0, botflag, 5);
+
+            		// Enable/disable feral interactive gamemode
+#if BOOST_OS_LINUX && defined(ENABLE_FERAL_GAMEMODE)
+            		m_feral_gamemode = new wxCheckBox(box, wxID_ANY, _("Enable Feral GameMode"));
+            		m_feral_gamemode->SetToolTip(_("Use FeralInteractive GameMode if installed."));
+            		second_row->Add(m_feral_gamemode, 0, botflag, 5);
+#endif
+
+			// temporary workaround because feature crashes on macOS
+#if BOOST_OS_MACOS
+			m_disable_screensaver->Enable(false);
+#endif
 
 			box_sizer->Add(second_row, 0, wxEXPAND, 5);
 		}
@@ -421,6 +453,47 @@ wxPanel* GeneralSettings2::AddAudioPage(wxNotebook* notebook)
 		m_pad_volume->Bind(wxEVT_SLIDER, &GeneralSettings2::OnVolumeChanged, this);
 
 		box_sizer->Add(audio_pad_row, 1, wxEXPAND, 5);
+		audio_panel_sizer->Add(box_sizer, 0, wxEXPAND | wxALL, 5);
+	}
+
+	{
+		auto box = new wxStaticBox(audio_panel, wxID_ANY, _("Microphone (Experimental)"));
+		auto box_sizer = new wxStaticBoxSizer(box, wxVERTICAL);
+
+		auto audio_input_row = new wxFlexGridSizer(0, 3, 0, 0);
+		audio_input_row->SetFlexibleDirection(wxBOTH);
+		audio_input_row->SetNonFlexibleGrowMode(wxFLEX_GROWMODE_SPECIFIED);
+
+		audio_input_row->Add(new wxStaticText(box, wxID_ANY, _("Device")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+		m_input_device = new wxChoice(box, wxID_ANY, wxDefaultPosition);
+		m_input_device->SetMinSize(wxSize(300, -1));
+		m_input_device->SetToolTip(_("Select the active audio input device for Wii U GamePad"));
+		audio_input_row->Add(m_input_device, 0, wxEXPAND | wxALL, 5);
+		audio_input_row->AddSpacer(0);
+
+		m_input_device->Bind(wxEVT_CHOICE, &GeneralSettings2::OnAudioDeviceSelected, this);
+
+		const wxString audio_channel_drc_choices[] = { _("Mono") }; // mono for now only
+
+		audio_input_row->Add(new wxStaticText(box, wxID_ANY, _("Channels")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+		m_input_channels = new wxChoice(box, wxID_ANY, wxDefaultPosition, wxDefaultSize, std::size(audio_channel_drc_choices), audio_channel_drc_choices);
+
+		m_input_channels->SetSelection(0); // set default to stereo
+
+		m_input_channels->Bind(wxEVT_CHOICE, &GeneralSettings2::OnAudioChannelsSelected, this);
+		audio_input_row->Add(m_input_channels, 0, wxEXPAND | wxALL, 5);
+		audio_input_row->AddSpacer(0);
+
+		audio_input_row->Add(new wxStaticText(box, wxID_ANY, _("Volume")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+		m_input_volume = new wxSlider(box, wxID_ANY, 100, 0, 100);
+		audio_input_row->Add(m_input_volume, 0, wxEXPAND | wxALL, 5);
+		auto audio_input_volume_text = new wxStaticText(box, wxID_ANY, wxT("100%"));
+		audio_input_row->Add(audio_input_volume_text, 0, wxALIGN_CENTER_VERTICAL | wxALL | wxALIGN_RIGHT, 5);
+
+		m_input_volume->Bind(wxEVT_SLIDER, &GeneralSettings2::OnSliderChangedPercent, this, wxID_ANY, wxID_ANY, new wxControlObject(audio_input_volume_text));
+		m_input_volume->Bind(wxEVT_SLIDER, &GeneralSettings2::OnVolumeChanged, this);
+
+		box_sizer->Add(audio_input_row, 1, wxEXPAND, 5);
 		audio_panel_sizer->Add(box_sizer, 0, wxEXPAND | wxALL, 5);
 	}
 
@@ -715,27 +788,42 @@ wxPanel* GeneralSettings2::AddDebugPage(wxNotebook* notebook)
 	auto* panel = new wxPanel(notebook, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL);
 	auto* debug_panel_sizer = new wxBoxSizer(wxVERTICAL);
 
-	auto* debug_row = new wxFlexGridSizer(0, 2, 0, 0);
-	debug_row->SetFlexibleDirection(wxBOTH);
-	debug_row->SetNonFlexibleGrowMode(wxFLEX_GROWMODE_SPECIFIED);
+	{
+		auto* debug_row = new wxFlexGridSizer(0, 2, 0, 0);
+		debug_row->SetFlexibleDirection(wxBOTH);
+		debug_row->SetNonFlexibleGrowMode(wxFLEX_GROWMODE_SPECIFIED);
 
-	debug_row->Add(new wxStaticText(panel, wxID_ANY, _("Crash dump"), wxDefaultPosition, wxDefaultSize, 0), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+		debug_row->Add(new wxStaticText(panel, wxID_ANY, _("Crash dump"), wxDefaultPosition, wxDefaultSize, 0), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
 
 #if BOOST_OS_WINDOWS
-	wxString dump_choices[] = { _("Disabled"), _("Lite"), _("Full") };
+		wxString dump_choices[] = {_("Disabled"), _("Lite"), _("Full")};
 #elif BOOST_OS_UNIX
-	wxString dump_choices[] = { _("Disabled"), _("Enabled") };
+		wxString dump_choices[] = {_("Disabled"), _("Enabled")};
 #endif
-	m_crash_dump = new wxChoice(panel, wxID_ANY, wxDefaultPosition, wxDefaultSize, std::size(dump_choices), dump_choices);
-	m_crash_dump->SetSelection(0);
+		m_crash_dump = new wxChoice(panel, wxID_ANY, wxDefaultPosition, wxDefaultSize, std::size(dump_choices), dump_choices);
+		m_crash_dump->SetSelection(0);
 #if BOOST_OS_WINDOWS
-	m_crash_dump->SetToolTip(_("Creates a dump when Cemu crashes\nOnly enable when requested by a developer!\nThe Full option will create a very large dump file (includes a full RAM dump of the Cemu process)"));
+		m_crash_dump->SetToolTip(_("Creates a dump when Cemu crashes\nOnly enable when requested by a developer!\nThe Full option will create a very large dump file (includes a full RAM dump of the Cemu process)"));
 #elif BOOST_OS_UNIX
-	m_crash_dump->SetToolTip(_("Creates a core dump when Cemu crashes\nOnly enable when requested by a developer!"));
+		m_crash_dump->SetToolTip(_("Creates a core dump when Cemu crashes\nOnly enable when requested by a developer!"));
 #endif
-	debug_row->Add(m_crash_dump, 0, wxALL | wxEXPAND, 5);
+		debug_row->Add(m_crash_dump, 0, wxALL | wxEXPAND, 5);
+		debug_panel_sizer->Add(debug_row, 0, wxALL | wxEXPAND, 5);
+	}
 
-	debug_panel_sizer->Add(debug_row, 0, wxALL | wxEXPAND, 5);
+	{
+		auto* debug_row = new wxFlexGridSizer(0, 2, 0, 0);
+		debug_row->SetFlexibleDirection(wxBOTH);
+		debug_row->SetNonFlexibleGrowMode(wxFLEX_GROWMODE_SPECIFIED);
+
+		debug_row->Add(new wxStaticText(panel, wxID_ANY, _("GDB Stub port"), wxDefaultPosition, wxDefaultSize, 0), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+
+		m_gdb_port = new wxSpinCtrl(panel, wxID_ANY, wxT("1337"), wxDefaultPosition, wxDefaultSize, 0, 1000, 65535);
+		m_gdb_port->SetToolTip(_("Changes the port that the GDB stub will use, which you can use by either starting Cemu with the --enable-gdbstub option or by enabling it the Debug tab."));
+
+		debug_row->Add(m_gdb_port, 0, wxALL | wxEXPAND, 5);
+		debug_panel_sizer->Add(debug_row, 0, wxALL | wxEXPAND, 5);
+	}
 
 	panel->SetSizerAndFit(debug_panel_sizer);
 
@@ -787,7 +875,9 @@ void GeneralSettings2::StoreConfig()
 	config.fullscreen_menubar = m_fullscreen_menubar->IsChecked();
 	config.check_update = m_auto_update->IsChecked();
 	config.save_screenshot = m_save_screenshot->IsChecked();
-
+#if BOOST_OS_LINUX && defined(ENABLE_FERAL_GAMEMODE)
+    config.feral_gamemode = m_feral_gamemode->IsChecked();
+#endif
 	const bool use_ps = m_permanent_storage->IsChecked();
 	if(use_ps)
 	{
@@ -812,8 +902,15 @@ void GeneralSettings2::StoreConfig()
 		config.permanent_storage = use_ps;
 	}
 
+	config.disable_screensaver = m_disable_screensaver->IsChecked();
+	// Toggle while a game is running
+	if (CafeSystem::IsTitleRunning())
+	{
+		ScreenSaver::SetInhibit(config.disable_screensaver);
+	}
+
 	if (!LaunchSettings::GetMLCPath().has_value())
-		config.SetMLCPath(m_mlc_path->GetValue().ToStdWstring(), false);
+		config.SetMLCPath(wxHelper::MakeFSPath(m_mlc_path->GetValue()), false);
 	
 	// -1 is default wx widget value -> set to dummy 0 so mainwindow and padwindow will update it
 	config.window_position = m_save_window_position_size->IsChecked() ? Vector2i{ 0,0 } : Vector2i{-1,-1};
@@ -857,9 +954,12 @@ void GeneralSettings2::StoreConfig()
 	config.tv_channels = (AudioChannels)m_tv_channels->GetSelection();
 	//config.pad_channels =  (AudioChannels)m_pad_channels->GetSelection();
 	config.pad_channels = kStereo; // (AudioChannels)m_pad_channels->GetSelection();
+	//config.input_channels =  (AudioChannels)m_input_channels->GetSelection();
+	config.input_channels = kMono; // (AudioChannels)m_input_channels->GetSelection();
 	
 	config.tv_volume = m_tv_volume->GetValue();
 	config.pad_volume = m_pad_volume->GetValue();
+	config.input_volume = m_input_volume->GetValue();
 
 	config.tv_device.clear();
 	const auto tv_device = m_tv_device->GetSelection();
@@ -877,6 +977,15 @@ void GeneralSettings2::StoreConfig()
 		const auto* device_description = (wxDeviceDescription*)m_pad_device->GetClientObject(pad_device);
 		if (device_description)
 			config.pad_device = device_description->GetDescription()->GetIdentifier();
+	}
+
+	config.input_device = L"";
+	const auto input_device = m_input_device->GetSelection();
+	if (input_device != wxNOT_FOUND && input_device != 0 && m_input_device->HasClientObjectData())
+	{
+		const auto* device_description = (wxDeviceDescription*)m_input_device->GetClientObject(input_device);
+		if (device_description)
+			config.input_device = device_description->GetDescription()->GetIdentifier();
 	}
 
 	// graphics
@@ -935,6 +1044,7 @@ void GeneralSettings2::StoreConfig()
 
 	// debug
 	config.crash_dump = (CrashDump)m_crash_dump->GetSelection();
+	config.gdb_port = m_gdb_port->GetValue();
 
 	g_config.Save();
 }
@@ -977,19 +1087,29 @@ void GeneralSettings2::OnAudioLatencyChanged(wxCommandEvent& event)
 
 void GeneralSettings2::OnVolumeChanged(wxCommandEvent& event)
 {
-	std::shared_lock lock(g_audioMutex);
-	if(event.GetEventObject() == m_pad_volume)
+	
+	if(event.GetEventObject() == m_input_volume)
 	{
-		if (g_padAudio)
-		{
-			g_padAudio->SetVolume(event.GetInt());
-			g_padVolume = event.GetInt();
-		}
+		std::shared_lock lock(g_audioInputMutex);
+		if (g_inputAudio)
+			g_inputAudio->SetVolume(event.GetInt());
 	}
 	else
 	{
-		if (g_tvAudio)
-			g_tvAudio->SetVolume(event.GetInt());
+		std::shared_lock lock(g_audioMutex);
+		if(event.GetEventObject() == m_pad_volume)
+		{
+			if (g_padAudio)
+			{
+				g_padAudio->SetVolume(event.GetInt());
+				g_padVolume = event.GetInt();
+			}
+		}
+		else
+		{
+			if (g_tvAudio)
+				g_tvAudio->SetVolume(event.GetInt());
+		}
 	}
 	
 
@@ -1048,9 +1168,11 @@ void GeneralSettings2::UpdateAudioDeviceList()
 {
 	m_tv_device->Clear();
 	m_pad_device->Clear();
+	m_input_device->Clear();
 
 	m_tv_device->Append(_("Disabled"));
 	m_pad_device->Append(_("Disabled"));
+	m_input_device->Append(_("Disabled"));
 
 	const auto audio_api = (IAudioAPI::AudioAPI)GetConfig().audio_api;
 	const auto devices = IAudioAPI::GetDevices(audio_api);
@@ -1060,12 +1182,22 @@ void GeneralSettings2::UpdateAudioDeviceList()
 		m_pad_device->Append(device->GetName(), new wxDeviceDescription(device));
 	}
 
+	const auto input_audio_api = IAudioInputAPI::Cubeb; //(IAudioAPI::AudioAPI)GetConfig().input_audio_api;
+	const auto input_devices = IAudioInputAPI::GetDevices(input_audio_api);
+
+	for (auto& device : input_devices)
+	{
+		m_input_device->Append(device->GetName(), new wxInputDeviceDescription(device));
+	}
+
 	if(m_tv_device->GetCount() > 1)
 		m_tv_device->SetSelection(1);
 	else
 		m_tv_device->SetSelection(0);
 
 	m_pad_device->SetSelection(0);
+
+	m_input_device->SetSelection(0);
 
 	// todo reset global instance of audio device
 }
@@ -1153,7 +1285,7 @@ void GeneralSettings2::OnAccountDelete(wxCommandEvent& event)
 	catch(const std::exception& ex)
 	{
 		SystemException sys(ex);
-		forceLog_printf((char*)sys.what());
+		cemuLog_log(LogType::Force, sys.what());
 	}
 	
 }
@@ -1334,8 +1466,9 @@ void GeneralSettings2::HandleGraphicsApiSelection()
 		m_vsync->AppendString(_("Off"));
 		m_vsync->AppendString(_("Double buffering"));
 		m_vsync->AppendString(_("Triple buffering"));
-	
+#if BOOST_OS_WINDOWS
 		m_vsync->AppendString(_("Match emulated display (Experimental)"));
+#endif
 
 		m_vsync->Select(selection);
 		
@@ -1369,9 +1502,9 @@ void GeneralSettings2::ApplyConfig()
 	auto& config = GetConfig();
 
 	if (LaunchSettings::GetMLCPath().has_value())
-		m_mlc_path->SetValue(wxString{ LaunchSettings::GetMLCPath().value().generic_wstring() });
+		m_mlc_path->SetValue(wxHelper::FromPath(LaunchSettings::GetMLCPath().value()));
 	else
-		m_mlc_path->SetValue(config.mlc_path.GetValue());
+		m_mlc_path->SetValue(wxHelper::FromUtf8(config.mlc_path.GetValue()));
 
 	m_save_window_position_size->SetValue(config.window_position != Vector2i{-1,-1});
 	m_save_padwindow_position_size->SetValue(config.pad_position != Vector2i{-1,-1});
@@ -1383,7 +1516,15 @@ void GeneralSettings2::ApplyConfig()
 	m_save_screenshot->SetValue(config.save_screenshot);
 
 	m_permanent_storage->SetValue(config.permanent_storage);
-	
+	m_disable_screensaver->SetValue(config.disable_screensaver);
+#if BOOST_OS_LINUX && defined(ENABLE_FERAL_GAMEMODE)
+    	m_feral_gamemode->SetValue(config.feral_gamemode);
+#endif
+	// temporary workaround because feature crashes on macOS
+#if BOOST_OS_MACOS
+	m_disable_screensaver->SetValue(false);
+#endif
+
 	for (auto& path : config.game_paths)
 	{
 		m_game_paths->Append(path);
@@ -1452,6 +1593,8 @@ void GeneralSettings2::ApplyConfig()
 	m_tv_channels->SetSelection(config.tv_channels);
 	//m_pad_channels->SetSelection(config.pad_channels);
 	m_pad_channels->SetSelection(0);
+	//m_input_channels->SetSelection(config.pad_channels);
+	m_input_channels->SetSelection(0);
 	
 	SendSliderEvent(m_tv_volume, config.tv_volume);
 
@@ -1486,6 +1629,22 @@ void GeneralSettings2::ApplyConfig()
 	else
 		m_pad_device->SetSelection(0);
 
+	SendSliderEvent(m_input_volume, config.input_volume);
+	if (!config.input_device.empty() && m_input_device->HasClientObjectData())
+	{
+		for (uint32 i = 0; i < m_input_device->GetCount(); ++i)
+		{
+			const auto device_description = (wxInputDeviceDescription*)m_input_device->GetClientObject(i);
+			if (device_description && config.input_device == device_description->GetDescription()->GetIdentifier())
+			{
+				m_input_device->SetSelection(i);
+				break;
+			}
+		}
+	}
+	else
+		m_input_device->SetSelection(0);
+
 	// account
 	UpdateOnlineAccounts();
 	m_active_account->SetSelection(0);
@@ -1506,6 +1665,7 @@ void GeneralSettings2::ApplyConfig()
 
 	// debug
 	m_crash_dump->SetSelection((int)config.crash_dump.GetValue());
+	m_gdb_port->SetValue(config.gdb_port.GetValue());
 }
 
 void GeneralSettings2::OnOnlineEnable(wxCommandEvent& event)
@@ -1550,6 +1710,9 @@ void GeneralSettings2::UpdateAudioDevice()
 {
 	auto& config = GetConfig();
 
+	std::unique_lock lock(g_audioMutex);
+	std::unique_lock inputLock(g_audioInputMutex);
+
 	// tv audio device
 	{
 		const auto selection = m_tv_device->GetSelection();
@@ -1559,13 +1722,13 @@ void GeneralSettings2::UpdateAudioDevice()
 			return;
 		}
 
+		g_tvAudio.reset();
+
 		if (m_tv_device->HasClientObjectData())
 		{
 			const auto description = (wxDeviceDescription*)m_tv_device->GetClientObject(selection);
 			if (description)
 			{
-				std::unique_lock lock(g_audioMutex);
-
 				sint32 channels;
 				if (m_game_launched && g_tvAudio)
 					channels = g_tvAudio->GetChannels();
@@ -1587,13 +1750,12 @@ void GeneralSettings2::UpdateAudioDevice()
 
 				try
 				{
-					g_tvAudio.reset();
 					g_tvAudio = IAudioAPI::CreateDevice((IAudioAPI::AudioAPI)config.audio_api, description->GetDescription(), 48000, channels, snd_core::AX_SAMPLES_PER_3MS_48KHZ * AX_FRAMES_PER_GROUP, 16);
 					g_tvAudio->SetVolume(m_tv_volume->GetValue());
 				}
 				catch (std::runtime_error& ex)
 				{
-					forceLog_printf("can't initialize tv audio: %s", ex.what());
+					cemuLog_log(LogType::Force, "can't initialize tv audio: {}", ex.what());
 				}
 			}
 		}
@@ -1608,13 +1770,13 @@ void GeneralSettings2::UpdateAudioDevice()
 			return;
 		}
 
+		g_padAudio.reset();
+
 		if (m_pad_device->HasClientObjectData())
 		{
 			const auto description = (wxDeviceDescription*)m_pad_device->GetClientObject(selection);
 			if (description)
 			{
-				std::unique_lock lock(g_audioMutex);
-
 				sint32 channels;
 				if (m_game_launched && g_padAudio)
 					channels = g_padAudio->GetChannels();
@@ -1636,14 +1798,61 @@ void GeneralSettings2::UpdateAudioDevice()
 
 				try
 				{
-					g_padAudio.reset();
 					g_padAudio = IAudioAPI::CreateDevice((IAudioAPI::AudioAPI)config.audio_api, description->GetDescription(), 48000, channels, snd_core::AX_SAMPLES_PER_3MS_48KHZ * AX_FRAMES_PER_GROUP, 16);
 					g_padAudio->SetVolume(m_pad_volume->GetValue());
 					g_padVolume = m_pad_volume->GetValue();
 				}
 				catch (std::runtime_error& ex)
 				{
-					forceLog_printf("can't initialize pad audio: %s", ex.what());
+					cemuLog_log(LogType::Force, "can't initialize pad audio: {}", ex.what());
+				}
+			}
+		}
+	}
+
+	// input audio device
+	{
+		const auto selection = m_input_device->GetSelection();
+		if (selection == wxNOT_FOUND)
+		{
+			cemu_assert_debug(false);
+			return;
+		}
+
+		g_inputAudio.reset();
+
+		if (m_input_device->HasClientObjectData())
+		{
+			const auto description = (wxInputDeviceDescription*)m_input_device->GetClientObject(selection);
+			if (description)
+			{
+				sint32 channels;
+				if (m_game_launched && g_inputAudio)
+					channels = g_inputAudio->GetChannels();
+				else
+				{
+					switch (config.input_channels)
+					{
+					case 0:
+						channels = 1;
+						break;
+					case 2:
+						channels = 6;
+						break;
+					default: // stereo
+						channels = 2;
+						break;
+					}
+				}
+
+				try
+				{
+					g_inputAudio = IAudioInputAPI::CreateDevice(IAudioInputAPI::AudioInputAPI::Cubeb, description->GetDescription(), 32000, channels, snd_core::AX_SAMPLES_PER_3MS_32KHZ, 16);
+					g_inputAudio->SetVolume(m_input_volume->GetValue());
+				}
+				catch (std::runtime_error& ex)
+				{
+					cemuLog_log(LogType::Force, "can't initialize pad audio: {}", ex.what());
 				}
 			}
 		}
@@ -1748,7 +1957,7 @@ void GeneralSettings2::OnMLCPathSelect(wxCommandEvent& event)
 	if (!CemuApp::SelectMLCPath(this))
 		return;
 	
-	m_mlc_path->SetValue(ActiveSettings::GetMlcPath().generic_string());
+	m_mlc_path->SetValue(wxHelper::FromPath(ActiveSettings::GetMlcPath()));
 	m_reload_gamelist = true;
 	m_mlc_modified = true;
 }
@@ -1760,16 +1969,16 @@ void GeneralSettings2::OnMLCPathChar(wxKeyEvent& event)
 
 	if(event.GetKeyCode() == WXK_DELETE || event.GetKeyCode() == WXK_BACK)
 	{
-		std::wstring newPath = L"";
+		fs::path newPath = "";
 		if(!CemuApp::TrySelectMLCPath(newPath))
 		{
 			const auto res = wxMessageBox(_("The default MLC path is inaccessible.\nDo you want to select a different path?"), _("Error"), wxYES_NO | wxCENTRE | wxICON_ERROR);
 			if (res == wxYES && CemuApp::SelectMLCPath(this))
-				newPath = ActiveSettings::GetMlcPath().wstring();
+				newPath = ActiveSettings::GetMlcPath();
 			else
 				return;
 		}
-		m_mlc_path->SetValue(newPath);
+		m_mlc_path->SetValue(wxHelper::FromPath(newPath));
 		m_reload_gamelist = true;
 		m_mlc_modified = true;
 	}

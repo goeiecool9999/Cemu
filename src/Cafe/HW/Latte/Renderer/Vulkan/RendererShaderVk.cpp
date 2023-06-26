@@ -1,16 +1,13 @@
 #include "Cafe/HW/Latte/Renderer/Vulkan/RendererShaderVk.h"
-
-#include <glslang/Public/ShaderLang.h>
-#include <glslang/SPIRV/GlslangToSpv.h>
-
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanAPI.h"
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanRenderer.h"
-
 #include "config/ActiveSettings.h"
 #include "config/CemuConfig.h"
 #include "util/helpers/ConcurrentQueue.h"
-
 #include "Cemu/FileCache/FileCache.h"
+
+#include <glslang/Public/ShaderLang.h>
+#include <glslang/SPIRV/GlslangToSpv.h>
 
 bool s_isLoadingShadersVk{ false };
 class FileCache* s_spirvCache{nullptr};
@@ -242,7 +239,7 @@ void RendererShaderVk::CreateVkShaderModule(std::span<uint32> spirvBuffer)
 	VkResult result = vkCreateShaderModule(m_device, &createInfo, nullptr, &m_shader_module);
 	if (result != VK_SUCCESS)
 	{
-		forceLog_printf("Vulkan: Shader error");
+		cemuLog_log(LogType::Force, "Vulkan: Shader error");
 		throw std::runtime_error(fmt::format("Failed to create shader module: {}", result));
 	}
 

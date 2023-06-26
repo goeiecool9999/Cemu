@@ -23,7 +23,7 @@ MPTR coreinit_allocFromSysArea(uint32 size, uint32 alignment)
 	sysAreaAllocatorOffset += (size+3)&~3;
 	if( sysAreaAllocatorOffset >= mmuRange_CEMU_AREA.getSize() )
 	{
-		forceLog_printf("Ran out of system memory");
+		cemuLog_log(LogType::Force, "Ran out of system memory");
 		cemu_assert(false); // out of bounds
 	}
 	s_allocator_mutex.unlock();
@@ -50,7 +50,7 @@ namespace coreinit
 	MEMList g_list3;
 
 	std::array<uint32, 3> gHeapFillValues{ 0xC3C3C3C3, 0xF3F3F3F3, 0xD3D3D3D3 };
-	OSSpinLock gHeapGlobalLock;
+	SysAllocator<OSSpinLock> gHeapGlobalLock;
 	MEMHeapBase* gDefaultHeap;
 
 	bool MEMHeapTable_Add(MEMHeapBase* heap)
@@ -464,7 +464,7 @@ namespace coreinit
 	void* default_MEMAllocFromDefaultHeap(uint32 size)
 	{
 		void* mem = MEMAllocFromExpHeapEx(gDefaultHeap, size, 0x40);
-		coreinitMemLog_printf("MEMAllocFromDefaultHeap(0x%08x) Result: 0x%08x", size, memory_getVirtualOffsetFromPointer(mem));
+		cemuLog_logDebug(LogType::CoreinitMem, "MEMAllocFromDefaultHeap(0x{:08x}) Result: 0x{:08x}", size, memory_getVirtualOffsetFromPointer(mem));
 		return mem;
 	}
 
@@ -478,7 +478,7 @@ namespace coreinit
 	void* default_MEMAllocFromDefaultHeapEx(uint32 size, sint32 alignment)
 	{
 		void* mem = MEMAllocFromExpHeapEx(gDefaultHeap, size, alignment);
-		coreinitMemLog_printf("MEMAllocFromDefaultHeap(0x%08x,%d) Result: 0x%08x", size, alignment, memory_getVirtualOffsetFromPointer(mem));
+		cemuLog_logDebug(LogType::CoreinitMem, "MEMAllocFromDefaultHeap(0x{:08x},{}) Result: 0x{:08x}", size, alignment, memory_getVirtualOffsetFromPointer(mem));
 		return mem;
 	}
 

@@ -467,7 +467,7 @@ void LatteDrawGL_prepareIndicesWithGPUCache(MPTR indexDataMPTR, _INDEX_TYPE inde
 		uint32 h = LatteDrawGL_calculateIndexDataHash(memory_getPointerFromPhysicalOffset(indexDataMPTR), cacheEntryItr->physSize);
 		if (cacheEntryItr->hash != h)
 		{
-			forceLogDebug_printf("IndexData hash changed");
+			cemuLog_logDebug(LogType::Force, "IndexData hash changed");
 			_decodeAndUploadIndexData(cacheEntryItr);
 			cacheEntryItr->hash = h;
 		}
@@ -494,7 +494,7 @@ void LatteDrawGL_prepareIndicesWithGPUCache(MPTR indexDataMPTR, _INDEX_TYPE inde
 				break;
 			if (indexDataCacheFirst == nullptr)
 			{
-				forceLog_printf("Unable to allocate entry in index cache");
+				cemuLog_log(LogType::Force, "Unable to allocate entry in index cache");
 				assert_dbg();
 			}
 		}
@@ -527,7 +527,7 @@ void LatteDrawGL_prepareIndicesWithGPUCache(MPTR indexDataMPTR, _INDEX_TYPE inde
 void LatteDraw_handleSpecialState8_clearAsDepth()
 {
 	if (LatteGPUState.contextNew.GetSpecialStateValues()[0] == 0)
-		forceLogDebug_printf("Special state 8 requires special state 0 but it is not set?");
+		cemuLog_logDebug(LogType::Force, "Special state 8 requires special state 0 but it is not set?");
 	// get depth buffer information
 	uint32 regDepthBuffer = LatteGPUState.contextRegister[mmDB_HTILE_DATA_BASE];
 	uint32 regDepthSize = LatteGPUState.contextRegister[mmDB_DEPTH_SIZE];
@@ -1042,7 +1042,7 @@ void OpenGLRenderer::draw_genericDrawHandler(uint32 baseVertex, uint32 baseInsta
 		LatteTextureView* rt_depth = LatteMRT::GetDepthAttachment();
 		if (!rt_depth || !rt_color)
 		{
-			cemuLog_force("GPU7 special state 5 used but render target not setup correctly");
+			cemuLog_log(LogType::Force, "GPU7 special state 5 used but render target not setup correctly");
 			return;
 		}
 		surfaceCopy_copySurfaceWithFormatConversion(rt_depth->baseTexture, rt_depth->firstMip, rt_depth->firstSlice, rt_color->baseTexture, rt_color->firstMip, rt_color->firstSlice, rt_depth->baseTexture->width, rt_depth->baseTexture->height);
@@ -1201,20 +1201,10 @@ void OpenGLRenderer::draw_beginSequence()
 void OpenGLRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, bool isFirst)
 {
 	bool isMinimal = !isFirst;
-	if (ActiveSettings::FrameProfilerEnabled())
-	{
-		if (isMinimal)
-			draw_genericDrawHandler<true, true>(baseVertex, baseInstance, instanceCount, count, indexDataMPTR, indexType);
-		else
-			draw_genericDrawHandler<false, true>(baseVertex, baseInstance, instanceCount, count, indexDataMPTR, indexType);
-	}
-	else
-	{
-		if (isMinimal)
-			draw_genericDrawHandler<true, false>(baseVertex, baseInstance, instanceCount, count, indexDataMPTR, indexType);
-		else
-			draw_genericDrawHandler<false, false>(baseVertex, baseInstance, instanceCount, count, indexDataMPTR, indexType);
-	}	
+    if (isMinimal)
+        draw_genericDrawHandler<true, false>(baseVertex, baseInstance, instanceCount, count, indexDataMPTR, indexType);
+    else
+        draw_genericDrawHandler<false, false>(baseVertex, baseInstance, instanceCount, count, indexDataMPTR, indexType);
 }
 
 void OpenGLRenderer::draw_endSequence()

@@ -105,7 +105,7 @@ bool GameUpdateWindow::ParseUpdate(const fs::path& metaPath)
 		}
 		catch (const std::exception& ex)
 		{
-			forceLog_printf("GameUpdateWindow::ParseUpdate exist-error: %s at %s", ex.what(), target_location.generic_u8string().c_str());
+			cemuLog_log(LogType::Force, "GameUpdateWindow::ParseUpdate exist-error: {} at {}", ex.what(), _pathToUtf8(target_location));
 		}
 	}
 
@@ -133,7 +133,7 @@ bool GameUpdateWindow::ParseUpdate(const fs::path& metaPath)
 	// checking size is buggy on Wine (on Steam Deck this would return values too small to install bigger updates) - we therefore skip this step
 	if(!IsRunningInWine())
 	{
-		const fs::space_info targetSpace = fs::space(target_location.root_path());
+		const fs::space_info targetSpace = fs::space(ActiveSettings::GetMlcPath());
 		if (targetSpace.free <= m_required_size)
 		{
 			auto string = wxStringFormat(_("Not enough space available.\nRequired: {0} MB\nAvailable: {1} MB"), L"%lld %lld", (m_required_size / 1024 / 1024), (targetSpace.free / 1024 / 1024));
@@ -307,7 +307,7 @@ void GameUpdateWindow::OnClose(wxCloseEvent& event)
 			}
 			catch (const std::exception& ex)
 			{
-				forceLogDebug_printf("can't restore update backup: %s",ex.what());
+				cemuLog_logDebug(LogType::Force, "can't restore update backup: {}",ex.what());
 			}
 		}
 		else
@@ -320,7 +320,7 @@ void GameUpdateWindow::OnClose(wxCloseEvent& event)
 			}
 			catch (const std::exception& ex)
 			{
-				forceLogDebug_printf("can't delete update backup: %s",ex.what());
+				cemuLog_logDebug(LogType::Force, "can't delete update backup: {}",ex.what());
 			}
 		}
 		

@@ -84,7 +84,7 @@ void createGraphicPackDownloadedVersionFile(const char* nameVersion)
 		file->writeString(nameVersion);
 	else
 	{
-		cemuLog_force("Failed to write graphic pack version.txt");
+		cemuLog_log(LogType::Force, "Failed to write graphic pack version.txt");
 	}
 }
 
@@ -136,8 +136,8 @@ void DownloadGraphicPacksWindow::UpdateThread()
 	else
 	{
 		// cemu api request failed, use hardcoded github url
-		forceLog_printf("Graphic pack update request failed or returned invalid URL. Using default repository URL instead");
-		githubAPIUrl = "https://api.github.com/repos/slashiee/cemu_graphic_packs/releases/latest";
+		cemuLog_log(LogType::Force, "Graphic pack update request failed or returned invalid URL. Using default repository URL instead");
+		githubAPIUrl = "https://api.github.com/repos/cemu-project/cemu_graphic_packs/releases/latest";
 	}
 	// github API request
 	if (curlDownloadFile(githubAPIUrl.c_str(), &tempDownloadState) == false)

@@ -14,6 +14,7 @@
 #include "gui/components/wxGameList.h"
 
 #include <future>
+#include "Cafe/HW/Espresso/Debugger/GDBStub.h"
 
 class DebuggerWindow2;
 struct GameEntry;
@@ -78,6 +79,7 @@ public:
 	PadViewFrame* GetPadView() const { return m_padView; }
 
 	void OnSizeEvent(wxSizeEvent& event);
+	void OnDPIChangedEvent(wxDPIChangedEvent& event);
 	void OnMove(wxMoveEvent& event);
 
 	void OnDebuggerClose(wxCloseEvent& event);
@@ -86,6 +88,7 @@ public:
 	void OnMouseWheel(wxMouseEvent& event);
 	void OnClose(wxCloseEvent& event);
 	void OnFileMenu(wxCommandEvent& event);
+	void OnOpenCemuFolder(wxCommandEvent& event);
 	void OnLaunchFromFile(wxLaunchGameEvent& event);
 	void OnInstallUpdate(wxCommandEvent& event);
 	void OnFileExit(wxCommandEvent& event);
@@ -104,6 +107,7 @@ public:
 	void OnDebugDumpUsedTextures(wxCommandEvent& event);
 	void OnDebugDumpUsedShaders(wxCommandEvent& event);
 	void OnLoggingWindow(wxCommandEvent& event);
+	void OnGDBStubToggle(wxCommandEvent& event);
 	void OnDebugViewPPCThreads(wxCommandEvent& event);
 	void OnDebugViewPPCDebugger(wxCommandEvent& event);
 	void OnDebugViewAudioDebugger(wxCommandEvent& event);
@@ -169,6 +173,7 @@ private:
 
 	std::string m_launched_game_name;
 
+	wxMenuItem* m_gdbstub_toggle{};
 	DebuggerWindow2* m_debugger_window = nullptr;
 	LoggingWindow* m_logging_window = nullptr;
 

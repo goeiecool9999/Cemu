@@ -42,6 +42,10 @@ private:
 	wxCheckBox* m_discord_presence, *m_fullscreen_menubar;
 	wxCheckBox* m_auto_update, *m_save_screenshot;
 	wxCheckBox* m_permanent_storage;
+	wxCheckBox* m_disable_screensaver;
+#if BOOST_OS_LINUX && defined(ENABLE_FERAL_GAMEMODE)
+   	wxCheckBox* m_feral_gamemode;
+#endif
 	wxListBox* m_game_paths;
 	wxTextCtrl* m_mlc_path;
 
@@ -58,9 +62,9 @@ private:
 	// Audio
 	wxChoice* m_audio_api;
 	wxSlider *m_audio_latency;
-	wxSlider *m_tv_volume, *m_pad_volume;
-	wxChoice *m_tv_channels, *m_pad_channels;
-	wxChoice *m_tv_device, *m_pad_device;
+	wxSlider *m_tv_volume, *m_pad_volume, *m_input_volume;
+	wxChoice *m_tv_channels, *m_pad_channels, *m_input_channels;
+	wxChoice *m_tv_device, *m_pad_device, *m_input_device;
 
 	// Account
 	wxButton* m_create_account, * m_delete_account;
@@ -74,6 +78,7 @@ private:
 
 	// Debug
 	wxChoice* m_crash_dump;
+	wxSpinCtrl* m_gdb_port;
 
 	void OnAccountCreate(wxCommandEvent& event);
 	void OnAccountDelete(wxCommandEvent& event);

@@ -254,7 +254,7 @@ namespace coreinit
 			else
 			{
 				if (failedAttempts >= 0x800)
-					cemuLog_force("Detected long-term contested OSLockMutex");
+					cemuLog_log(LogType::Force, "Detected long-term contested OSLockMutex");
 				currentThread->waitingForMutex = mutex;
 				mutex->threadQueue.queueAndWait(currentThread);
 				currentThread->waitingForMutex = nullptr;
@@ -550,7 +550,7 @@ namespace coreinit
 		if (fastMutex->owner != currentThread)
 		{
 			// seen in Paper Mario Color Splash
-			//forceLog_printf("OSFastMutex_Unlock() called on mutex which is not owned by current thread");
+			//cemuLog_log(LogType::Force, "OSFastMutex_Unlock() called on mutex which is not owned by current thread");
 			_OSFastMutex_ReleaseContention(fastMutex);
 			return;
 		}

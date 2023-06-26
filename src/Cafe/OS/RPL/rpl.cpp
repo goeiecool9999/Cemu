@@ -231,18 +231,18 @@ bool RPLLoader_ProcessHeaders(std::string_view moduleName, uint8* rplData, uint3
 	rplSectionEntryNew_t* fileinfoSection = rplLoaderContext->sectionTablePtr + ((uint32)rplLoaderContext->rplHeader.sectionTableEntryCount - 1);
 	if (fileinfoSection->fileOffset == 0 || (uint32)fileinfoSection->fileOffset >= rplSize || (uint32)fileinfoSection->type != SHT_RPL_FILEINFO)
 	{
-		forceLogDebug_printf("RPLLoader: Last section not FILEINFO");
+		cemuLog_logDebug(LogType::Force, "RPLLoader: Last section not FILEINFO");
 	}
 	// verify that section n-2 is CRCs
 	rplSectionEntryNew_t* crcSection = rplLoaderContext->sectionTablePtr + ((uint32)rplLoaderContext->rplHeader.sectionTableEntryCount - 2);
 	if (crcSection->fileOffset == 0 || (uint32)crcSection->fileOffset >= rplSize || (uint32)crcSection->type != SHT_RPL_CRCS)
 	{
-		forceLogDebug_printf("RPLLoader: The section before FILEINFO must be CRCs");
+		cemuLog_logDebug(LogType::Force, "RPLLoader: The section before FILEINFO must be CRCs");
 	}
 	// load FILEINFO section
 	if (fileinfoSection->sectionSize < sizeof(RPLFileInfoData))
 	{
-		cemuLog_force("RPLLoader: FILEINFO section size is below expected size");
+		cemuLog_log(LogType::Force, "RPLLoader: FILEINFO section size is below expected size");
 		delete rplLoaderContext;
 		return false;
 	}
@@ -251,7 +251,7 @@ bool RPLLoader_ProcessHeaders(std::string_view moduleName, uint8* rplData, uint3
 	uint8* fileInfoRawPtr = (uint8*)(rplData + fileinfoSection->fileOffset);
 	if (((uint64)fileinfoSection->fileOffset+fileinfoSection->sectionSize) > (uint64)rplSize)
 	{
-		cemuLog_force("RPLLoader: FILEINFO section outside of RPL file bounds");
+		cemuLog_log(LogType::Force, "RPLLoader: FILEINFO section outside of RPL file bounds");
 		return false;
 	}
 	rplLoaderContext->sectionData_fileInfo.resize(fileinfoSection->sectionSize);
@@ -260,7 +260,7 @@ bool RPLLoader_ProcessHeaders(std::string_view moduleName, uint8* rplData, uint3
 	RPLFileInfoData* fileInfoPtr = (RPLFileInfoData*)rplLoaderContext->sectionData_fileInfo.data();
 	if (fileInfoPtr->fileInfoMagic != 0xCAFE0402)
 	{
-		cemuLog_force("RPLLoader: Invalid FILEINFO magic");
+		cemuLog_log(LogType::Force, "RPLLoader: Invalid FILEINFO magic");
 		return false;
 	}
 
@@ -287,16 +287,16 @@ bool RPLLoader_ProcessHeaders(std::string_view moduleName, uint8* rplData, uint3
 	uint32 crcTableExpectedSize = sectionCount * sizeof(uint32be);
 	if (!RPLLoader_CheckBounds(rplLoaderContext, crcSection->fileOffset, crcTableExpectedSize))
 	{
-		cemuLog_force("RPLLoader: CRC section outside of RPL file bounds");
+		cemuLog_log(LogType::Force, "RPLLoader: CRC section outside of RPL file bounds");
 		crcSection->sectionSize = 0;
 	}
 	else if (crcSection->sectionSize < crcTableExpectedSize)
 	{
-		cemuLog_force("RPLLoader: CRC section size (0x{:x}) less than required (0x{:x})", (uint32)crcSection->sectionSize, crcTableExpectedSize);
+		cemuLog_log(LogType::Force, "RPLLoader: CRC section size (0x{:x}) less than required (0x{:x})", (uint32)crcSection->sectionSize, crcTableExpectedSize);
 	}
 	else if (crcSection->sectionSize != crcTableExpectedSize)
 	{
-		cemuLog_force("RPLLoader: CRC section size (0x{:x}) does not match expected size (0x{:x})", (uint32)crcSection->sectionSize, crcTableExpectedSize);
+		cemuLog_log(LogType::Force, "RPLLoader: CRC section size (0x{:x}) does not match expected size (0x{:x})", (uint32)crcSection->sectionSize, crcTableExpectedSize);
 	}
 
 	uint32 crcActualSectionCount = crcSection->sectionSize / sizeof(uint32); // how many CRCs are actually stored
@@ -314,7 +314,7 @@ bool RPLLoader_ProcessHeaders(std::string_view moduleName, uint8* rplData, uint3
 	uint32 crcFileinfo = rplLoaderContext->GetSectionCRC(sectionCount - 1);
 	if (crcCalcFileinfo != crcFileinfo)
 	{
-		cemuLog_force("RPLLoader: FILEINFO section has CRC mismatch - Calculated: {:08x} Actual: {:08x}", crcCalcFileinfo, crcFileinfo);
+		cemuLog_log(LogType::Force, "RPLLoader: FILEINFO section has CRC mismatch - Calculated: {:08x} Actual: {:08x}", crcCalcFileinfo, crcFileinfo);
 	}
 
 	rplLoaderContext->sectionAddressTable2[sectionCount - 1].ptr = rplLoaderContext->sectionData_fileInfo.data();
@@ -336,7 +336,7 @@ rplSectionEntryNew_t* RPLLoader_GetSection(RPLModule* rplLoaderContext, sint32 s
 	sint32 sectionCount = rplLoaderContext->rplHeader.sectionTableEntryCount;
 	if (sectionIndex < 0 || sectionIndex >= sectionCount)
 	{
-		forceLog_printf("RPLLoader: Section index out of bounds");
+		cemuLog_log(LogType::Force, "RPLLoader: Section index out of bounds");
 		rplLoaderContext->hasError = true;
 		return nullptr;
 	}
@@ -363,7 +363,7 @@ RPLUncompressedSection* RPLLoader_LoadUncompressedSection(RPLModule* rplLoaderCo
 	if (!RPLLoader_CheckBounds(rplLoaderContext, section->fileOffset, section->sectionSize))
 	{
 		// BSS
-		forceLog_printf("RPLLoader: Raw data for section %d exceeds bounds of RPL file", sectionIndex);
+		cemuLog_log(LogType::Force, "RPLLoader: Raw data for section {} exceeds bounds of RPL file", sectionIndex);
 		rplLoaderContext->hasError = true;
 		delete uSection;
 		return nullptr;
@@ -375,7 +375,7 @@ RPLUncompressedSection* RPLLoader_LoadUncompressedSection(RPLModule* rplLoaderCo
 		// decompress
 		if (!RPLLoader_CheckBounds(rplLoaderContext, section->fileOffset, sizeof(uint32be)) )
 		{
-			forceLog_printf("RPLLoader: Uncompressed data of section %d is too large", sectionIndex);
+			cemuLog_log(LogType::Force, "RPLLoader: Uncompressed data of section {} is too large", sectionIndex);
 			rplLoaderContext->hasError = true;
 			delete uSection;
 			return nullptr;
@@ -383,7 +383,7 @@ RPLUncompressedSection* RPLLoader_LoadUncompressedSection(RPLModule* rplLoaderCo
 		uint32 uncompressedSize = *(uint32be*)(rplLoaderContext->RPLRawData.data() + (uint32)section->fileOffset);
 		if (uncompressedSize >= 1*1024*1024*1024) // sections bigger than 1GB not allowed
 		{
-			forceLog_printf("RPLLoader: Uncompressed data of section %d is too large", sectionIndex);
+			cemuLog_log(LogType::Force, "RPLLoader: Uncompressed data of section {} is too large", sectionIndex);
 			rplLoaderContext->hasError = true;
 			delete uSection;
 			return nullptr;
@@ -405,7 +405,7 @@ RPLUncompressedSection* RPLLoader_LoadUncompressedSection(RPLModule* rplLoaderCo
 			inflateEnd(&strm);
 			if ((ret != Z_OK && ret != Z_STREAM_END) || strm.avail_in != 0 || strm.avail_out != 0)
 			{
-				forceLog_printf("RPLLoader: Error while inflating data for section %d", sectionIndex);
+				cemuLog_log(LogType::Force, "RPLLoader: Error while inflating data for section {}", sectionIndex);
 				rplLoaderContext->hasError = true;
 				delete uSection;
 				return nullptr;
@@ -430,7 +430,7 @@ bool RPLLoader_LoadSingleSection(RPLModule* rplLoaderContext, sint32 sectionInde
 
 	uint32 mappingOffset = (uint32)section->virtualAddress - (uint32)regionMappingInfo->baseAddress;
 	if (mappingOffset >= 0x10000000)
-		forceLogDebug_printf("Suspicious section mapping offset: 0x%08x", mappingOffset);
+		cemuLog_logDebug(LogType::Force, "Suspicious section mapping offset: 0x{:08x}", mappingOffset);
 	uint32 sectionAddress = mappedAddress + mappingOffset;
 
 	rplLoaderContext->sectionAddressTable2[sectionIndex].ptr = memory_getPointerFromVirtualOffset(sectionAddress);
@@ -448,13 +448,13 @@ bool RPLLoader_LoadSingleSection(RPLModule* rplLoaderContext, sint32 sectionInde
 
 	// copy to mapped address
 	if(section->virtualAddress < regionMappingInfo->baseAddress || (section->virtualAddress + uncompressedSection->sectionData.size()) > regionMappingInfo->endAddress)
-		cemuLog_force("RPLLoader: Section {} (0x{:08x} to 0x{:08x}) is not fully contained in it's bounding region (0x{:08x} to 0x{:08x})", sectionIndex, section->virtualAddress, section->virtualAddress + uncompressedSection->sectionData.size(), regionMappingInfo->baseAddress, regionMappingInfo->endAddress);
+		cemuLog_log(LogType::Force, "RPLLoader: Section {} (0x{:08x} to 0x{:08x}) is not fully contained in it's bounding region (0x{:08x} to 0x{:08x})", sectionIndex, section->virtualAddress, section->virtualAddress + uncompressedSection->sectionData.size(), regionMappingInfo->baseAddress, regionMappingInfo->endAddress);
 	uint8* sectionAddressPtr = memory_getPointerFromVirtualOffset(sectionAddress);
 	std::copy(uncompressedSection->sectionData.begin(), uncompressedSection->sectionData.end(), sectionAddressPtr);
 
 	// update size in section (todo - use separate field)
 	if (uncompressedSection->sectionData.size() < section->sectionSize)
-		forceLog_printf("RPLLoader: Section %d uncompresses to %d bytes but sectionSize is %d", sectionIndex, uncompressedSection->sectionData.size(), (uint32)section->sectionSize);
+		cemuLog_log(LogType::Force, "RPLLoader: Section {} uncompresses to {} bytes but sectionSize is {}", sectionIndex, uncompressedSection->sectionData.size(), (uint32)section->sectionSize);
 
 	section->sectionSize = uncompressedSection->sectionData.size();
 
@@ -612,7 +612,7 @@ bool RPLLoader_LoadSections(sint32 aProcId, RPLModule* rplLoaderContext)
 
 		if (section->type == 0x8)
 		{
-			cemuLog_force("RPLLoader: Unsupported text section type 0x8");
+			cemuLog_log(LogType::Force, "RPLLoader: Unsupported text section type 0x8");
 			cemu_assert_debug(false);
 		}
 
@@ -734,7 +734,7 @@ uint32 RPLLoader_MakePPCCallable(void(*ppcCallableExport)(PPCInterpreter_t* hCPU
 	sint32 functionIndex = PPCInterpreter_registerHLECall(ppcCallableExport);
 	MPTR codeAddr = memory_getVirtualOffsetFromPointer(RPLLoader_AllocateTrampolineCodeSpace(4));
 	uint32 opcode = (1 << 26) | functionIndex;
-	memory_writeU32Direct(codeAddr, opcode);
+	memory_write<uint32>(codeAddr, opcode);
 	g_map_callableExports[ppcCallableExport] = codeAddr;
 	return codeAddr;
 }
@@ -772,7 +772,7 @@ uint32 rpl_mapHLEImport(RPLModule* rplLoaderContext, const char* rplName, const 
 	{
 		MPTR codeAddr = memory_getVirtualOffsetFromPointer(RPLLoader_AllocateTrampolineCodeSpace(4));
 		uint32 opcode = (1 << 26) | functionIndex;
-		memory_writeU32Direct(codeAddr, opcode);
+		memory_write<uint32>(codeAddr, opcode);
 		// register mapped import
 		mappedFunctionImport_t newImport;
 		newImport.hash1 = mappedImportHash1;
@@ -792,8 +792,8 @@ uint32 rpl_mapHLEImport(RPLModule* rplLoaderContext, const char* rplName, const 
 	uint32 codeStart = memory_getVirtualOffsetFromPointer(RPLLoader_AllocateTrampolineCodeSpace(256));
 	uint32 currentAddress = codeStart;
 	uint32 opcode = (1 << 26) | (0xFFD0); // opcode for HLE: Unsupported import
-	memory_writeU32Direct(codeStart + 0, opcode);
-	memory_writeU32Direct(codeStart + 4, 0x4E800020);
+	memory_write<uint32>(codeStart + 0, opcode);
+	memory_write<uint32>(codeStart + 4, 0x4E800020);
 	currentAddress += 8;
 	// write name of lib/function
 	sint32 libNameLength = std::min(128, (sint32)strlen(libName));
@@ -931,7 +931,7 @@ bool RPLLoader_FixImportSymbols(RPLModule* rplLoaderContext, sint32 symtabSectio
 		
 		if (symSectionIndex >= sharedImportTracking.size())
 		{
-			cemuLog_force("RPL-Loader: Symbol {} references invalid section", i);
+			cemuLog_log(LogType::Force, "RPL-Loader: Symbol {} references invalid section", i);
 		}
 		else if (sharedImportTracking[symSectionIndex].rplLoaderContext != nullptr)
 		{
@@ -956,7 +956,7 @@ bool RPLLoader_FixImportSymbols(RPLModule* rplLoaderContext, sint32 symtabSectio
 				char* symbolName = (char*)strtabData + nameOffset;
 				if (nameOffset >= strtabSize)
 				{
-					forceLog_printf("RPLLoader: Symbol %d in section %d has out-of-bounds name offset", i, symSectionIndex);
+					cemuLog_log(LogType::Force, "RPLLoader: Symbol {} in section {} has out-of-bounds name offset", i, symSectionIndex);
 					continue;
 				}
 
@@ -1018,7 +1018,7 @@ bool RPLLoader_FixImportSymbols(RPLModule* rplLoaderContext, sint32 symtabSectio
 #ifdef CEMU_DEBUG_ASSERT
 					if (nameOffset > 0)
 					{
-						forceLogDebug_printf("export not found - force lookup in function exports");
+						cemuLog_logDebug(LogType::Force, "export not found - force lookup in function exports");
 						// workaround - force look up export in function exports
 						char* exportNameData = (char*)((uint8*)ctxExportModule->exportFDataPtr - 8);
 						for (uint32 f = 0; f < ctxExportModule->exportFCount; f++)
@@ -1104,7 +1104,7 @@ bool RPLLoader_ApplySingleReloc(RPLModule* rplLoaderContext, uint32 uknR3, uint8
 		{
 			// within range, update jump opcode
 			if ((jumpDistance & 3) != 0)
-				cemuLog_force("RPL-Loader: Encountered unaligned RPL_RELOC_REL24");
+				cemuLog_log(LogType::Force, "RPL-Loader: Encountered unaligned RPL_RELOC_REL24");
 			opc &= ~0x03fffffc;
 			opc |= (jumpDistance &0x03fffffc);
 			*(uint32be*)relocAddr = opc;
@@ -1125,7 +1125,7 @@ bool RPLLoader_ApplySingleReloc(RPLModule* rplLoaderContext, uint32 uknR3, uint8
 		{
 			// within range, update jump opcode
 			if ((jumpDistance & 3) != 0)
-				cemuLog_force("RPL-Loader: Encountered unaligned RPL_RELOC_REL14");
+				cemuLog_log(LogType::Force, "RPL-Loader: Encountered unaligned RPL_RELOC_REL14");
 			opc &= ~0xfffc;
 			opc |= (jumpDistance & 0xfffc);
 			*(uint32be*)relocAddr = opc;
@@ -1190,7 +1190,7 @@ bool RPLLoader_ApplySingleReloc(RPLModule* rplLoaderContext, uint32 uknR3, uint8
 		}
 		else
 		{
-			cemuLog_force("RPLLoader: sdata reloc uses register other than r2/r13");
+			cemuLog_log(LogType::Force, "RPLLoader: sdata reloc uses register other than r2/r13");
 			cemu_assert(false);
 		}
 	}
@@ -1224,7 +1224,7 @@ bool RPLLoader_ApplySingleReloc(RPLModule* rplLoaderContext, uint32 uknR3, uint8
 	}
 	else
 	{
-		cemuLog_force("RPLLoader: Unsupported reloc type 0x{:02x}", relocType);
+		cemuLog_log(LogType::Force, "RPLLoader: Unsupported reloc type 0x{:02x}", relocType);
 		cemu_assert_debug(false); // unknown reloc type
 	}
 	return true;
@@ -1287,7 +1287,7 @@ bool RPLLoader_ApplyRelocs(RPLModule* rplLoaderContext, sint32 relaSectionIndex,
 	uint32 crc = rplLoaderContext->GetSectionCRC(relaSectionIndex);
 	if (calcCRC != crc)
 	{
-		forceLog_printf("RPLLoader %s - Relocation section %d has CRC mismatch - Calc: %08x Actual: %08x", rplLoaderContext->moduleName2.c_str(), relaSectionIndex, calcCRC, crc);
+		cemuLog_log(LogType::Force, "RPLLoader {} - Relocation section {} has CRC mismatch - Calc: {:08x} Actual: {:08x}", rplLoaderContext->moduleName2.c_str(), relaSectionIndex, calcCRC, crc);
 	}
 	// process relocations
 	sint32 relocCount = relocSize / sizeof(rplRelocNew_t);
@@ -1304,7 +1304,7 @@ bool RPLLoader_ApplyRelocs(RPLModule* rplLoaderContext, sint32 relaSectionIndex,
 		}
 		if (relocSymbolIndex >= symbolCount)
 		{
-			forceLogDebug_printf("reloc with symbol index out of range 0x%04x", (uint32)relocSymbolIndex);
+			cemuLog_logDebug(LogType::Force, "reloc with symbol index out of range 0x{:04x}", (uint32)relocSymbolIndex);
 			reloc++;
 			continue;
 		}
@@ -1313,7 +1313,7 @@ bool RPLLoader_ApplyRelocs(RPLModule* rplLoaderContext, sint32 relaSectionIndex,
 
 		if ((uint32)sym->sectionIndex >= (uint32)rplLoaderContext->rplHeader.sectionTableEntryCount)
 		{
-			forceLogDebug_printf("reloc with sectionIndex out of range 0x%04x", (uint32)sym->sectionIndex);
+			cemuLog_logDebug(LogType::Force, "reloc with sectionIndex out of range 0x{:04x}", (uint32)sym->sectionIndex);
 			reloc++;
 			continue;
 		}
@@ -1344,7 +1344,7 @@ bool RPLLoader_ApplyRelocs(RPLModule* rplLoaderContext, sint32 relaSectionIndex,
 				assert_dbg(); // not a TLS symbol
 			if (rplLoaderContext->fileInfo.tlsModuleIndex == -1)
 			{
-				cemuLog_force("RPLLoader: TLS relocs applied to non-TLS module");
+				cemuLog_log(LogType::Force, "RPLLoader: TLS relocs applied to non-TLS module");
 				cemu_assert_debug(false); // module not a TLS-module
 			}
 			tlsModuleIndex = rplLoaderContext->fileInfo.tlsModuleIndex;
@@ -1503,14 +1503,14 @@ void RPLLoader_BeginCemuhookCRC(RPLModule* rpl)
 			rawSize = decompressedSize;
 			if (rawSize >= 1024*1024*1024)
 			{
-				forceLogDebug_printf("RPLLoader-CRC: Cannot load section %d which is too large (%u bytes)", i, decompressedSize);
+				cemuLog_logDebug(LogType::Force, "RPLLoader-CRC: Cannot load section {} which is too large ({} bytes)", i, decompressedSize);
 				cemu_assert_debug(false);
 				continue;
 			}
 			rawData = (uint8*)malloc(decompressedSize);
 			if (rawData == nullptr)
 			{
-				forceLogDebug_printf("RPLLoader-CRC: Failed to allocate memory for uncompressed section %d (%u bytes)", i, decompressedSize);
+				cemuLog_logDebug(LogType::Force, "RPLLoader-CRC: Failed to allocate memory for uncompressed section {} ({} bytes)", i, decompressedSize);
 				cemu_assert_debug(false);
 				continue;
 			}
@@ -1528,8 +1528,8 @@ void RPLLoader_BeginCemuhookCRC(RPLModule* rpl)
 			auto ret = inflate(&strm, Z_FULL_FLUSH);
 			if (ret != Z_OK && ret != Z_STREAM_END || strm.avail_in != 0 || strm.avail_out != 0)
 			{
-				forceLogDebug_printf("RPLLoader-CRC: Unable to decompress section %d", i);
-				forceLogDebug_printf("zRet %d availIn %d availOut %d", ret, (sint32)strm.avail_in, (sint32)strm.avail_out);
+				cemuLog_logDebug(LogType::Force, "RPLLoader-CRC: Unable to decompress section {}", i);
+				cemuLog_logDebug(LogType::Force, "zRet {} availIn {} availOut {}", ret, (sint32)strm.avail_in, (sint32)strm.avail_out);
 				cemu_assert_debug(false);
 				free(rawData);
 				inflateEnd(&strm);
@@ -1630,7 +1630,7 @@ RPLModule* rpl_loadFromMem(uint8* rplData, sint32 size, char* name)
 		return nullptr;
 	}
 
-	forceLogDebug_printf("Load %s Code-Offset: -0x%x", name, rpl->regionMappingBase_text.GetMPTR() - 0x02000000);
+	cemuLog_logDebug(LogType::Force, "Load {} Code-Offset: -0x{:x}", name, rpl->regionMappingBase_text.GetMPTR() - 0x02000000);
 
 	// sdata (r2/r13)
 	uint32 sdataBaseAddress = rpl->fileInfo.sdataBase1; // base + 0x8000
@@ -1664,7 +1664,7 @@ RPLModule* rpl_loadFromMem(uint8* rplData, sint32 size, char* name)
 	// cancel if error
 	if (rpl->hasError)
 	{
-		forceLog_printf("RPLLoader: Unable to load RPL due to errors");
+		cemuLog_log(LogType::Force, "RPLLoader: Unable to load RPL due to errors");
 		delete rpl;
 		return nullptr;
 	}
@@ -1962,7 +1962,7 @@ void RPLLoader_AddDependency(const char* name)
 	rplLoader_currentTlsModuleIndex++;
 	rplLoader_currentHandleCounter++;
 	if (rplLoader_currentTlsModuleIndex == 0x7FFF)
-		cemuLog_force("RPLLoader: Exhausted TLS module indices pool");
+		cemuLog_log(LogType::Force, "RPLLoader: Exhausted TLS module indices pool");
 	// convert name to path/filename if it isn't already one
 	if (strchr(name, '.'))
 	{
@@ -2070,7 +2070,7 @@ bool RPLLoader_LoadFromVirtualPath(rplDependency_t* dependency, char* filePath)
 	uint8* rplData = fsc_extractFile(filePath, &rplSize);
 	if (rplData)
 	{
-		forceLogDebug_printf("Loading: %s", filePath);
+		cemuLog_logDebug(LogType::Force, "Loading: {}", filePath);
 		dependency->rplLoaderContext = rpl_loadFromMem(rplData, rplSize, filePath);
 		free(rplData);
 		return true;
@@ -2120,7 +2120,7 @@ void RPLLoader_LoadDependency(rplDependency_t* dependency)
 		auto fileData = FileStream::LoadIntoMemory(filePath);
 		if (fileData)
 		{
-			forceLog_printf("Loading RPL: /cafeLibs/%s", dependency->filepath);
+			cemuLog_log(LogType::Force, "Loading RPL: /cafeLibs/{}", dependency->filepath);
 			dependency->rplLoaderContext = rpl_loadFromMem(fileData->data(), fileData->size(), dependency->filepath);
 			return;
 		}

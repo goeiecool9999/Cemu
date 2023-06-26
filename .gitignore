@@ -13,9 +13,11 @@
 *.out
 *.app
 .vs
+.vscode
 .idea/
 
 build/
+cmake-build-*-*/
 out/
 .cache/
 bin/Cemu_*
@@ -35,6 +37,8 @@ bin/title_list_cache.xml
 bin/debugger/*
 bin/sdcard/*
 bin/screenshots/*
+bin/dump/*
+bin/cafeLibs/*
 
 !bin/shaderCache/info.txt
 bin/shaderCache/*

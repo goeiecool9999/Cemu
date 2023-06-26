@@ -113,7 +113,7 @@ void iosuAct_loadAccounts()
 	//	}
 	//}
 
-	cemuLog_force(L"IOSU_ACT: using account {} in first slot", first_acc.GetMiiName());
+	cemuLog_log(LogType::Force, L"IOSU_ACT: using account {} in first slot", first_acc.GetMiiName());
 	
 	_actAccountDataInitialized = true;
 }
@@ -595,7 +595,7 @@ int iosuAct_thread()
 				}
 				else
 				{
-					forceLogDebug_printf("Gen UUID unknown mode %d", actCemuRequest->uuidName);
+					cemuLog_logDebug(LogType::Force, "Gen UUID unknown mode {}", actCemuRequest->uuidName);
 				}
 				actCemuRequest->setACTReturnCode(0);
 			}

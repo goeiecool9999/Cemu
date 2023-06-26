@@ -10,25 +10,25 @@
 
 XMLCemuConfig_t g_config(L"settings.xml");
 
-void CemuConfig::SetMLCPath(std::wstring_view path, bool save)
+void CemuConfig::SetMLCPath(fs::path path, bool save)
 {
-	mlc_path.SetValue(path);
+	mlc_path.SetValue(_pathToUtf8(path));
 	if(save)
 		g_config.Save();
 
 	// if custom mlc path has been selected, store it in permanent config
-	if (!boost::starts_with(path, ActiveSettings::GetDefaultMLCPath().generic_wstring()))
+	if (path != ActiveSettings::GetDefaultMLCPath())
 	{
 		try
 		{
 			auto pconfig = PermanentConfig::Load();
-			pconfig.custom_mlc_path = boost::nowide::narrow(path.data(), path.size());
+			pconfig.custom_mlc_path = _pathToUtf8(path);
 			pconfig.Store();
 		}
 		catch (const PSDisabledException&) {}
 		catch (const std::exception& ex)
 		{
-			forceLog_printf("can't store custom mlc path in permanent storage: %s", ex.what());
+			cemuLog_log(LogType::Force, "can't store custom mlc path in permanent storage: {}", ex.what());
 		}
 	}
 
@@ -46,26 +46,22 @@ void CemuConfig::Load(XMLConfigParser& parser)
 	advanced_ppc_logging = parser.get("advanced_ppc_logging", advanced_ppc_logging.GetInitValue());
 
 	const char* mlc = parser.get("mlc_path", "");
-	try
-	{
-		mlc_path = boost::nowide::widen(mlc);
-	}
-	catch (const std::exception&)
-	{
-		forceLog_printf("config load error: can't load mlc path: %s", mlc);
-	}
+	mlc_path = mlc;
 
 	permanent_storage = parser.get("permanent_storage", permanent_storage);
 	
 	language = parser.get<sint32>("language", wxLANGUAGE_DEFAULT);
 	use_discord_presence = parser.get("use_discord_presence", true);
 	fullscreen_menubar = parser.get("fullscreen_menubar", false);
+    	feral_gamemode = parser.get("feral_gamemode", false);
 	check_update = parser.get("check_update", check_update);
 	save_screenshot = parser.get("save_screenshot", save_screenshot);
 	did_show_vulkan_warning = parser.get("vk_warning", did_show_vulkan_warning);
 	did_show_graphic_pack_download = parser.get("gp_download", did_show_graphic_pack_download);
+	did_show_macos_disclaimer = parser.get("macos_disclaimer", did_show_macos_disclaimer);
 	fullscreen = parser.get("fullscreen", fullscreen);
 	proxy_server = parser.get("proxy_server", "");
+	disable_screensaver = parser.get("disable_screensaver", disable_screensaver);
 
 	// cpu_mode = parser.get("cpu_mode", cpu_mode.GetInitValue());
 	//console_region = parser.get("console_region", console_region.GetInitValue());
@@ -119,7 +115,7 @@ void CemuConfig::Load(XMLConfigParser& parser)
 		}
 		catch (const std::exception&)
 		{
-			forceLog_printf("config load error: can't load recently launched game file: %s", path.c_str());
+			cemuLog_log(LogType::Force, "config load error: can't load recently launched game file: {}", path);
 		}
 	}
 	
@@ -137,7 +133,7 @@ void CemuConfig::Load(XMLConfigParser& parser)
 		}
 		catch (const std::exception&)
 		{
-			forceLog_printf("config load error: can't load recently launched nfc file: %s", path.c_str());
+			cemuLog_log(LogType::Force, "config load error: can't load recently launched nfc file: {}", path);
 		}
 	}
 
@@ -155,7 +151,7 @@ void CemuConfig::Load(XMLConfigParser& parser)
 		}
 		catch (const std::exception&)
 		{
-			forceLog_printf("config load error: can't load game path: %s", path.c_str());
+			cemuLog_log(LogType::Force, "config load error: can't load game path: {}", path);
 		}
 	}
 
@@ -191,7 +187,7 @@ void CemuConfig::Load(XMLConfigParser& parser)
 		}
 		catch (const std::exception&)
 		{
-			forceLog_printf("config load error: can't load game cache entry: %s", rpx);
+			cemuLog_log(LogType::Force, "config load error: can't load game cache entry: {}", rpx);
 		}
 	}
 	_lock.unlock();
@@ -295,8 +291,10 @@ void CemuConfig::Load(XMLConfigParser& parser)
 	audio_delay = audio.get("delay", 2);
 	tv_channels = audio.get("TVChannels", kStereo);
 	pad_channels = audio.get("PadChannels", kStereo);
+	input_channels = audio.get("InputChannels", kMono);
 	tv_volume = audio.get("TVVolume", 20);
 	pad_volume = audio.get("PadVolume", 0);
+	input_volume = audio.get("InputVolume", 20);
 
 	const auto tv = audio.get("TVDevice", "");
 	try
@@ -305,7 +303,7 @@ void CemuConfig::Load(XMLConfigParser& parser)
 	}
 	catch (const std::exception&)
 	{
-		forceLog_printf("config load error: can't load tv device: %s", tv);
+		cemuLog_log(LogType::Force, "config load error: can't load tv device: {}", tv);
 	}
 
 	const auto pad = audio.get("PadDevice", "");
@@ -315,7 +313,17 @@ void CemuConfig::Load(XMLConfigParser& parser)
 	}
 	catch (const std::exception&)
 	{
-		forceLog_printf("config load error: can't load pad device: %s", pad);
+		cemuLog_log(LogType::Force, "config load error: can't load pad device: {}", pad);
+	}
+
+	const auto input_device_name = audio.get("InputDevice", "");
+	try
+	{
+		input_device = boost::nowide::widen(input_device_name);
+	}
+	catch (const std::exception&)
+	{
+		cemuLog_log(LogType::Force, "config load error: can't load input device: {}", input_device_name);
 	}
 
 	// account
@@ -330,6 +338,7 @@ void CemuConfig::Load(XMLConfigParser& parser)
 #elif BOOST_OS_UNIX
 	crash_dump = debug.get("CrashDumpUnix", crash_dump);
 #endif
+	gdb_port = debug.get("GDBPort", 1337);
 
 	// input
 	auto input = parser.get("Input");
@@ -344,18 +353,21 @@ void CemuConfig::Save(XMLConfigParser& parser)
 	// general settings
 	config.set("logflag", log_flag.GetValue());
 	config.set("advanced_ppc_logging", advanced_ppc_logging.GetValue());
-	config.set("mlc_path", boost::nowide::narrow(mlc_path.GetValue()).c_str());
+	config.set("mlc_path", mlc_path.GetValue().c_str());
 	config.set<bool>("permanent_storage", permanent_storage);
 	config.set<sint32>("language", language);
 	config.set<bool>("use_discord_presence", use_discord_presence);
 	config.set<bool>("fullscreen_menubar", fullscreen_menubar);
+    	config.set<bool>("feral_gamemode", feral_gamemode);
 	config.set<bool>("check_update", check_update);
 	config.set<bool>("save_screenshot", save_screenshot);
 	config.set<bool>("vk_warning", did_show_vulkan_warning);
 	config.set<bool>("gp_download", did_show_graphic_pack_download);
+	config.set<bool>("macos_disclaimer", did_show_macos_disclaimer);
 	config.set<bool>("fullscreen", fullscreen);
 	config.set("proxy_server", proxy_server.GetValue().c_str());
-	
+	config.set<bool>("disable_screensaver", disable_screensaver);
+
 	// config.set("cpu_mode", cpu_mode.GetValue());
 	//config.set("console_region", console_region.GetValue());
 	config.set("console_language", console_language.GetValue());
@@ -488,10 +500,13 @@ void CemuConfig::Save(XMLConfigParser& parser)
 	audio.set("delay", audio_delay);
 	audio.set("TVChannels", tv_channels);
 	audio.set("PadChannels", pad_channels);
+	audio.set("InputChannels", input_channels);
 	audio.set("TVVolume", tv_volume);
 	audio.set("PadVolume", pad_volume);
+	audio.set("InputVolume", input_volume);
 	audio.set("TVDevice", boost::nowide::narrow(tv_device).c_str());
 	audio.set("PadDevice", boost::nowide::narrow(pad_device).c_str());
+	audio.set("InputDevice", boost::nowide::narrow(input_device).c_str());
 
 	// account
 	auto acc = config.set("Account");
@@ -505,6 +520,7 @@ void CemuConfig::Save(XMLConfigParser& parser)
 #elif BOOST_OS_UNIX
 	debug.set("CrashDumpUnix", crash_dump.GetValue());
 #endif
+	debug.set("GDBPort", gdb_port);
 
 	// input
 	auto input = config.set("Input");

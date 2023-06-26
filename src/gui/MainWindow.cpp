@@ -3,6 +3,7 @@
 #include "gui/guiWrapper.h"
 
 #include <wx/mstream.h>
+#include <wx/clipbrd.h>
 
 #include "gui/GameUpdateWindow.h"
 #include "gui/PadViewFrame.h"
@@ -19,6 +20,7 @@
 #include "util/helpers/helpers.h"
 #include "config/CemuConfig.h"
 #include "Cemu/DiscordPresence/DiscordPresence.h"
+#include "util/ScreenSaver/ScreenSaver.h"
 #include "gui/GeneralSettings2.h"
 #include "gui/GraphicPacksWindow2.h"
 #include "gui/GameProfileWindow.h"
@@ -55,6 +57,15 @@
 #include "resource/embedded/resources.h"
 #endif
 
+#if BOOST_OS_LINUX && HAS_WAYLAND
+#include "gui/helpers/wxWayland.h"
+#endif
+
+//GameMode support
+#if BOOST_OS_LINUX && defined(ENABLE_FERAL_GAMEMODE)
+#include "gamemode_client.h"
+#endif
+
 #include "Cafe/TitleList/TitleInfo.h"
 #include "Cafe/TitleList/TitleList.h"
 #include "wxHelper.h"
@@ -71,6 +82,7 @@ enum
 	// file
 	MAINFRAME_MENU_ID_FILE_LOAD = 20100,
 	MAINFRAME_MENU_ID_FILE_INSTALL_UPDATE,
+	MAINFRAME_MENU_ID_FILE_OPEN_CEMU_FOLDER,
 	MAINFRAME_MENU_ID_FILE_EXIT,
 	MAINFRAME_MENU_ID_FILE_END_EMULATION,
 	MAINFRAME_MENU_ID_FILE_RECENT_0,
@@ -122,17 +134,17 @@ enum
 	// debug
 	MAINFRAME_MENU_ID_DEBUG_RENDER_UPSIDE_DOWN = 21100,
 	MAINFRAME_MENU_ID_DEBUG_VIEW_LOGGING_WINDOW,
+	MAINFRAME_MENU_ID_DEBUG_TOGGLE_GDB_STUB,
 	MAINFRAME_MENU_ID_DEBUG_VIEW_PPC_THREADS,
 	MAINFRAME_MENU_ID_DEBUG_VIEW_PPC_DEBUGGER,
 	MAINFRAME_MENU_ID_DEBUG_VIEW_AUDIO_DEBUGGER,
 	MAINFRAME_MENU_ID_DEBUG_VIEW_TEXTURE_RELATIONS,
-	MAINFRAME_MENU_ID_DEBUG_SHOW_FRAME_PROFILER,
 	MAINFRAME_MENU_ID_DEBUG_AUDIO_AUX_ONLY,
 	MAINFRAME_MENU_ID_DEBUG_VK_ACCURATE_BARRIERS,
 
 	// debug->logging
 	MAINFRAME_MENU_ID_DEBUG_LOGGING0 = 21500,
-	MAINFRAME_MENU_ID_DEBUG_ADVANCED_PPC_INFO,
+	MAINFRAME_MENU_ID_DEBUG_ADVANCED_PPC_INFO = 21599,
 	// debug->dump
 	MAINFRAME_MENU_ID_DEBUG_DUMP_TEXTURES = 21600,
 	MAINFRAME_MENU_ID_DEBUG_DUMP_SHADERS,
@@ -156,10 +168,12 @@ wxBEGIN_EVENT_TABLE(MainWindow, wxFrame)
 EVT_TIMER(MAINFRAME_ID_TIMER1, MainWindow::OnTimer)
 EVT_CLOSE(MainWindow::OnClose)
 EVT_SIZE(MainWindow::OnSizeEvent)
+EVT_DPI_CHANGED(MainWindow::OnDPIChangedEvent)
 EVT_MOVE(MainWindow::OnMove)
 // file menu
 EVT_MENU(MAINFRAME_MENU_ID_FILE_LOAD, MainWindow::OnFileMenu)
 EVT_MENU(MAINFRAME_MENU_ID_FILE_INSTALL_UPDATE, MainWindow::OnInstallUpdate)
+EVT_MENU(MAINFRAME_MENU_ID_FILE_OPEN_CEMU_FOLDER, MainWindow::OnOpenCemuFolder)
 EVT_MENU(MAINFRAME_MENU_ID_FILE_EXIT, MainWindow::OnFileExit)
 EVT_MENU(MAINFRAME_MENU_ID_FILE_END_EMULATION, MainWindow::OnFileMenu)
 EVT_MENU_RANGE(MAINFRAME_MENU_ID_FILE_RECENT_0 + 0, MAINFRAME_MENU_ID_FILE_RECENT_LAST, MainWindow::OnFileMenu)
@@ -179,7 +193,7 @@ EVT_MENU(MAINFRAME_MENU_ID_OPTIONS_INPUT, MainWindow::OnOptionsInput)
 EVT_MENU(MAINFRAME_MENU_ID_TOOLS_MEMORY_SEARCHER, MainWindow::OnToolsInput)
 EVT_MENU(MAINFRAME_MENU_ID_TOOLS_TITLE_MANAGER, MainWindow::OnToolsInput)
 EVT_MENU(MAINFRAME_MENU_ID_TOOLS_DOWNLOAD_MANAGER, MainWindow::OnToolsInput)
-//// cpu menu
+// cpu menu
 EVT_MENU(MAINFRAME_MENU_ID_TIMER_SPEED_8X, MainWindow::OnDebugSetting)
 EVT_MENU(MAINFRAME_MENU_ID_TIMER_SPEED_4X, MainWindow::OnDebugSetting)
 EVT_MENU(MAINFRAME_MENU_ID_TIMER_SPEED_2X, MainWindow::OnDebugSetting)
@@ -191,7 +205,7 @@ EVT_MENU(MAINFRAME_MENU_ID_TIMER_SPEED_0125X, MainWindow::OnDebugSetting)
 EVT_MENU(MAINFRAME_MENU_ID_NFC_TOUCH_NFC_FILE, MainWindow::OnNFCMenu)
 EVT_MENU_RANGE(MAINFRAME_MENU_ID_NFC_RECENT_0 + 0, MAINFRAME_MENU_ID_NFC_RECENT_LAST, MainWindow::OnNFCMenu)
 // debug -> logging menu
-EVT_MENU_RANGE(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + 0, MAINFRAME_MENU_ID_DEBUG_LOGGING0 + 19, MainWindow::OnDebugLoggingToggleFlagGeneric)
+EVT_MENU_RANGE(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + 0, MAINFRAME_MENU_ID_DEBUG_LOGGING0 + 98, MainWindow::OnDebugLoggingToggleFlagGeneric)
 EVT_MENU(MAINFRAME_MENU_ID_DEBUG_ADVANCED_PPC_INFO, MainWindow::OnPPCInfoToggle)
 // debug -> dump menu
 EVT_MENU(MAINFRAME_MENU_ID_DEBUG_DUMP_TEXTURES, MainWindow::OnDebugDumpUsedTextures)
@@ -205,11 +219,11 @@ EVT_MENU(MAINFRAME_MENU_ID_DEBUG_DUMP_RAM, MainWindow::OnDebugSetting)
 EVT_MENU(MAINFRAME_MENU_ID_DEBUG_DUMP_FST, MainWindow::OnDebugSetting)
 // debug -> View ...
 EVT_MENU(MAINFRAME_MENU_ID_DEBUG_VIEW_LOGGING_WINDOW, MainWindow::OnLoggingWindow)
+EVT_MENU(MAINFRAME_MENU_ID_DEBUG_TOGGLE_GDB_STUB, MainWindow::OnGDBStubToggle)
 EVT_MENU(MAINFRAME_MENU_ID_DEBUG_VIEW_PPC_THREADS, MainWindow::OnDebugViewPPCThreads)
 EVT_MENU(MAINFRAME_MENU_ID_DEBUG_VIEW_PPC_DEBUGGER, MainWindow::OnDebugViewPPCDebugger)
 EVT_MENU(MAINFRAME_MENU_ID_DEBUG_VIEW_AUDIO_DEBUGGER, MainWindow::OnDebugViewAudioDebugger)
 EVT_MENU(MAINFRAME_MENU_ID_DEBUG_VIEW_TEXTURE_RELATIONS, MainWindow::OnDebugViewTextureRelations)
-EVT_MENU(MAINFRAME_MENU_ID_DEBUG_SHOW_FRAME_PROFILER, MainWindow::OnDebugSetting)
 // help menu
 EVT_MENU(MAINFRAME_MENU_ID_HELP_WEB, MainWindow::OnHelpVistWebpage)
 EVT_MENU(MAINFRAME_MENU_ID_HELP_ABOUT, MainWindow::OnHelpAbout)
@@ -281,6 +295,10 @@ MainWindow::MainWindow()
 	SetClientSize(1280, 720);
 	SetIcon(wxICON(M_WND_ICON128));
 
+#if BOOST_OS_MACOS
+	this->EnableFullScreenView(true);
+#endif
+
 #if BOOST_OS_WINDOWS
 	HICON hWindowIcon = (HICON)LoadImageA(NULL, "M_WND_ICON16", IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
 	SendMessage(this->GetHWND(), WM_SETICON, ICON_SMALL, (LPARAM)hWindowIcon);
@@ -323,8 +341,8 @@ MainWindow::MainWindow()
 
 	LoadSettings();
 
-#ifdef ENABLE_DISCORD_RPC
 	auto& config = GetConfig();
+#ifdef ENABLE_DISCORD_RPC
 	if (config.use_discord_presence)
 		m_discord = std::make_unique<DiscordPresence>();
 #endif
@@ -335,6 +353,10 @@ MainWindow::MainWindow()
 	if (LaunchSettings::GetLoadFile().has_value())
 	{
 		MainWindow::RequestLaunchGame(LaunchSettings::GetLoadFile().value(), wxLaunchGameEvent::INITIATED_BY::COMMAND_LINE);
+	}
+	if (LaunchSettings::GDBStubEnabled())
+	{
+		g_gdbstub = std::make_unique<GDBServer>(config.gdb_port);
 	}
 }
 
@@ -379,6 +401,8 @@ namespace coreinit
 
 void MainWindow::OnClose(wxCloseEvent& event)
 {
+	wxTheClipboard->Flush();
+
 	if(m_game_list)
 		m_game_list->OnClose(event);
 
@@ -549,8 +573,33 @@ bool MainWindow::FileLoad(std::wstring fileName, wxLaunchGameEvent::INITIATED_BY
 		m_discord->UpdatePresence(DiscordPresence::Playing, m_launched_game_name);
 	#endif
 
+	if (GetConfig().disable_screensaver)
+	{
+		ScreenSaver::SetInhibit(true);
+		// TODO: disable when only the game, not Cemu, is closed (a feature not yet implemented)
+		// currently unnecessary because this will happen automatically when Cemu closes
+		// ScreenSaver::SetInhibit(false);
+	}
+
 	if (ActiveSettings::FullscreenEnabled())
 		SetFullScreen(true);
+
+    //GameMode support
+#if BOOST_OS_LINUX && defined(ENABLE_FERAL_GAMEMODE)
+    if(GetConfig().feral_gamemode)
+    {
+        // attempt to start gamemode
+        if(gamemode_request_start() < 0)
+        {
+            // GameMode failed to start
+            cemuLog_log(LogType::Force, "Could not start GameMode");
+        }
+        else
+        {
+            cemuLog_log(LogType::Force, "GameMode has been started.");
+        }
+    }
+#endif
 
 	CreateCanvas();
 	CafeSystem::LaunchForegroundTitle();
@@ -586,7 +635,7 @@ void MainWindow::OnFileMenu(wxCommandEvent& event)
 		
 		wxFileDialog openFileDialog(this, _("Open file to launch"), wxEmptyString, wxEmptyString, wildcard, wxFD_OPEN | wxFD_FILE_MUST_EXIST);
 
-		if (openFileDialog.ShowModal() == wxID_CANCEL)
+		if (openFileDialog.ShowModal() == wxID_CANCEL || openFileDialog.GetPath().IsEmpty())
 			return;
 
 		const wxString wxStrFilePath = openFileDialog.GetPath();	
@@ -612,13 +661,18 @@ void MainWindow::OnFileMenu(wxCommandEvent& event)
 	}
 }
 
+void MainWindow::OnOpenCemuFolder(wxCommandEvent& event)
+{
+	wxLaunchDefaultApplication(wxHelper::FromPath(ActiveSettings::GetUserDataPath()));
+}
+
 void MainWindow::OnInstallUpdate(wxCommandEvent& event)
 {
 	while (true)
 	{
 		wxDirDialog openDirDialog(nullptr, _("Select folder of title to install"), "", wxDD_DEFAULT_STYLE | wxDD_DIR_MUST_EXIST, wxDefaultPosition, wxDefaultSize, _("Select the folder that stores your update, DLC or base game files"));
 		int modalChoice = openDirDialog.ShowModal();
-		if (modalChoice == wxID_CANCEL)
+		if (modalChoice == wxID_CANCEL || openDirDialog.GetPath().IsEmpty())
 			break;
 		if (modalChoice == wxID_OK)
 		{
@@ -659,7 +713,7 @@ void MainWindow::OnNFCMenu(wxCommandEvent& event)
 		wxFileDialog
 			openFileDialog(this, _("Open file to load"), "", "",
 				"All NFC files (bin, dat, nfc)|*.bin;*.dat;*.nfc|All files (*.*)|*", wxFD_OPEN | wxFD_FILE_MUST_EXIST); // TRANSLATE
-		if (openFileDialog.ShowModal() == wxID_CANCEL)
+		if (openFileDialog.ShowModal() == wxID_CANCEL || openFileDialog.GetPath().IsEmpty())
 			return;
 		wxString wxStrFilePath = openFileDialog.GetPath();
 		uint32 nfcError;
@@ -723,6 +777,12 @@ void MainWindow::TogglePadView()
 		m_padView->Bind(wxEVT_CLOSE_WINDOW, &MainWindow::OnPadClose, this);
 
 		m_padView->Show(true);
+
+#if BOOST_OS_LINUX && HAS_WAYLAND
+		if (wxWlIsWaylandWindow(m_padView))
+			wxWlSetAppId(m_padView, "info.cemu.Cemu");
+#endif
+
 		m_padView->Initialize();
 		if (m_game_launched)
 			m_padView->InitializeRenderCanvas();
@@ -976,10 +1036,6 @@ void MainWindow::OnDebugSetting(wxCommandEvent& event)
 				wxMessageBox(_("Dump complete"));
 			}*/
 	}
-	else if (event.GetId() == MAINFRAME_MENU_ID_DEBUG_SHOW_FRAME_PROFILER)
-	{
-		ActiveSettings::EnableFrameProfiler(event.IsChecked());
-	}
 	else if (event.GetId() == MAINFRAME_MENU_ID_DEBUG_DUMP_CURL_REQUESTS)
 	{
 		// toggle debug -> dump -> curl requests
@@ -989,13 +1045,13 @@ void MainWindow::OnDebugSetting(wxCommandEvent& event)
 		{
 			try
 			{
-				const fs::path path(CemuApp::GetUserDataPath().ToStdString());
+				const fs::path path(ActiveSettings::GetUserDataPath());
 				fs::create_directories(path / "dump" / "curl");
 			}
 			catch (const std::exception& ex)
 			{
 				SystemException sys(ex);
-				forceLog_printf("error when creating dump curl folder: %s", sys.what());
+				cemuLog_log(LogType::Force, "error when creating dump curl folder: {}", sys.what());
 				ActiveSettings::EnableDumpLibcurlRequests(false);
 			}
 		}
@@ -1025,9 +1081,9 @@ void MainWindow::OnDebugLoggingToggleFlagGeneric(wxCommandEvent& event)
 	sint32 loggingIdBase = MAINFRAME_MENU_ID_DEBUG_LOGGING0;
 
 	sint32 id = event.GetId();
-	if (id >= loggingIdBase && id < (MAINFRAME_MENU_ID_DEBUG_LOGGING0 + 20))
+	if (id >= loggingIdBase && id < (MAINFRAME_MENU_ID_DEBUG_LOGGING0 + 64))
 	{
-		cafeLog_setLoggingFlagEnable(id - loggingIdBase, event.IsChecked());
+		cemuLog_setFlag(static_cast<LogType>(id - loggingIdBase), event.IsChecked());
 	}
 }
 
@@ -1046,13 +1102,13 @@ void MainWindow::OnDebugDumpUsedTextures(wxCommandEvent& event)
 		try
 		{
 			// create directory
-			const fs::path path(CemuApp::GetUserDataPath().ToStdString());
+			const fs::path path(ActiveSettings::GetUserDataPath());
 			fs::create_directories(path / "dump" / "textures");
 		}
 		catch (const std::exception& ex)
 		{
 			SystemException sys(ex);
-			forceLog_printf("can't create texture dump folder: %s", ex.what());
+			cemuLog_log(LogType::Force, "can't create texture dump folder: {}", ex.what());
 			ActiveSettings::EnableDumpTextures(false);
 		}
 	}
@@ -1067,13 +1123,13 @@ void MainWindow::OnDebugDumpUsedShaders(wxCommandEvent& event)
 		try
 		{
 			// create directory
-			const fs::path path(CemuApp::GetUserDataPath().ToStdString());
+			const fs::path path(ActiveSettings::GetUserDataPath());
 			fs::create_directories(path / "dump" / "shaders");
 		}
 		catch (const std::exception & ex)
 		{
 			SystemException sys(ex);
-			forceLog_printf("can't create shaders dump folder: %s", ex.what());
+			cemuLog_log(LogType::Force, "can't create shaders dump folder: {}", ex.what());
 			ActiveSettings::EnableDumpShaders(false);
 		}
 	}
@@ -1091,6 +1147,18 @@ void MainWindow::OnLoggingWindow(wxCommandEvent& event)
 		event.Skip();
 	});
 	m_logging_window->Show(true);
+}
+
+void MainWindow::OnGDBStubToggle(wxCommandEvent& event)
+{
+	if (g_gdbstub)
+	{
+		g_gdbstub.release();
+		return;
+	}
+
+	const auto& config = GetConfig();
+	g_gdbstub = std::make_unique<GDBServer>(config.gdb_port);
 }
 
 void MainWindow::OnDebugViewPPCThreads(wxCommandEvent& event)
@@ -1299,7 +1367,8 @@ void MainWindow::OnMouseMove(wxMouseEvent& event)
 
 	auto& instance = InputManager::instance();
 	std::unique_lock lock(instance.m_main_mouse.m_mutex);
-	instance.m_main_mouse.position = { event.GetPosition().x, event.GetPosition().y };
+	auto physPos = ToPhys(event.GetPosition());
+	instance.m_main_mouse.position = { physPos.x, physPos.y };
 	lock.unlock();
 
 	if (!IsFullScreen())
@@ -1317,7 +1386,8 @@ void MainWindow::OnMouseLeft(wxMouseEvent& event)
 	
 	std::scoped_lock lock(instance.m_main_mouse.m_mutex);
 	instance.m_main_mouse.left_down = event.ButtonDown(wxMOUSE_BTN_LEFT);
-	instance.m_main_mouse.position = { event.GetPosition().x, event.GetPosition().y };
+	auto physPos = ToPhys(event.GetPosition());
+	instance.m_main_mouse.position = { physPos.x, physPos.y };
 	if (event.ButtonDown(wxMOUSE_BTN_LEFT))
 		instance.m_main_mouse.left_down_toggle = true;
 	
@@ -1330,7 +1400,8 @@ void MainWindow::OnMouseRight(wxMouseEvent& event)
 
 	std::scoped_lock lock(instance.m_main_mouse.m_mutex);
 	instance.m_main_mouse.right_down = event.ButtonDown(wxMOUSE_BTN_RIGHT);
-	instance.m_main_mouse.position = { event.GetPosition().x, event.GetPosition().y };
+	auto physPos = ToPhys(event.GetPosition());
+	instance.m_main_mouse.position = { physPos.x, physPos.y };
 	if(event.ButtonDown(wxMOUSE_BTN_RIGHT))
 		instance.m_main_mouse.right_down_toggle = true;
 	
@@ -1373,7 +1444,7 @@ void MainWindow::OnKeyUp(wxKeyEvent& event)
 	const auto code = event.GetKeyCode();
 	if (code == WXK_ESCAPE)
 		SetFullScreen(false);
-	else if (code == WXK_RETURN && event.AltDown())
+	else if (code == WXK_RETURN && event.AltDown() || code == WXK_F11)
 		SetFullScreen(!IsFullScreen());
 	else if (code == WXK_F12)
 		g_window_info.has_screenshot_request = true; // async screenshot request
@@ -1384,7 +1455,7 @@ void MainWindow::OnChar(wxKeyEvent& event)
 	if (swkbd_hasKeyboardInputHook())
 		swkbd_keyInput(event.GetUnicodeKey());
 	
-	event.Skip();
+	// event.Skip();
 }
 
 void MainWindow::OnToolsInput(wxCommandEvent& event)
@@ -1430,7 +1501,8 @@ void MainWindow::OnGesturePan(wxPanGestureEvent& event)
 {
 	auto& instance = InputManager::instance();
 	std::scoped_lock lock(instance.m_main_touch.m_mutex);
-	instance.m_main_touch.position = { event.GetPosition().x, event.GetPosition().y };
+	auto physPos = ToPhys(event.GetPosition());
+	instance.m_main_touch.position = { physPos.x, physPos.y };
 	instance.m_main_touch.left_down = event.IsGestureStart() || !event.IsGestureEnd();
 	if (event.IsGestureStart() || !event.IsGestureEnd())
 		instance.m_main_touch.left_down_toggle = true;
@@ -1505,6 +1577,9 @@ void MainWindow::OnSizeEvent(wxSizeEvent& event)
 	const wxSize client_size = GetClientSize();
 	g_window_info.width = client_size.GetWidth();
 	g_window_info.height = client_size.GetHeight();
+	g_window_info.phys_width = ToPhys(client_size.GetWidth());
+	g_window_info.phys_height = ToPhys(client_size.GetHeight());
+	g_window_info.dpi_scale = GetDPIScaleFactor();
 
 	if (m_debugger_window && m_debugger_window->IsShown())
 		m_debugger_window->OnParentMove(GetPosition(), event.GetSize());
@@ -1512,6 +1587,17 @@ void MainWindow::OnSizeEvent(wxSizeEvent& event)
 	event.Skip();
 
 	VsyncDriver_notifyWindowPosChanged();
+}
+
+void MainWindow::OnDPIChangedEvent(wxDPIChangedEvent& event)
+{
+	event.Skip();
+	const wxSize client_size = GetClientSize();
+	g_window_info.width = client_size.GetWidth();
+	g_window_info.height = client_size.GetHeight();
+	g_window_info.phys_width = ToPhys(client_size.GetWidth());
+	g_window_info.phys_height = ToPhys(client_size.GetHeight());
+	g_window_info.dpi_scale = GetDPIScaleFactor();
 }
 
 void MainWindow::OnMove(wxMoveEvent& event)
@@ -1691,8 +1777,6 @@ public:
 	void Create(wxWindow* parent = NULL)
 	{
 		SetIcon(wxICON(M_WND_ICON128));
-
-		this->SetBackgroundColour(wxColour(0xFFFFFFFF));
 
 		wxScrolledWindow* scrolledWindow = new wxScrolledWindow(this);
 
@@ -1974,7 +2058,6 @@ void MainWindow::RecreateMenu()
 				break;
 		}
 		m_fileMenuSeparator1 = m_fileMenu->AppendSeparator();
-
 	}
 	else
 	{
@@ -1983,6 +2066,9 @@ void MainWindow::RecreateMenu()
 		m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_END_EMULATION, _("End emulation"));
 #endif
 	}
+
+	m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_OPEN_CEMU_FOLDER, _("&Open Cemu folder"));
+	m_fileMenu->AppendSeparator();
 
 	m_exitMenuItem = m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_EXIT, _("&Exit"));
 	m_menuBar->Append(m_fileMenu, _("&File"));
@@ -2080,29 +2166,28 @@ void MainWindow::RecreateMenu()
 	// debug->logging submenu
 	wxMenu* debugLoggingMenu = new wxMenu;
 
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_UNSUPPORTED_API, _("&Unsupported API calls"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_UNSUPPORTED_API));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_COREINIT_LOGGING, _("&Coreinit Logging (OSReport/OSConsole)"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_COREINIT_LOGGING));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_FILE, _("&Coreinit File-Access"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_FILE));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_THREADSYNC, _("&Coreinit Thread-Synchronization API"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_THREADSYNC));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_COREINIT_MEM, _("&Coreinit Memory API"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_COREINIT_MEM));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_COREINIT_MP, _("&Coreinit MP API"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_COREINIT_MP));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_COREINIT_THREAD, _("&Coreinit Thread API"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_COREINIT_THREAD));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_NFP, _("&NN NFP"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_NFP));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_GX2, _("&GX2 API"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_GX2));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_SNDAPI, _("&Audio API"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_SNDAPI));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_INPUT, _("&Input API"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_INPUT));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_SOCKET, _("&Socket API"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_SOCKET));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_SAVE, _("&Save API"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_SAVE));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_H264, _("&H264 API"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_H264));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::UnsupportedAPI), _("&Unsupported API calls"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::UnsupportedAPI));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::CoreinitLogging), _("&Coreinit Logging (OSReport/OSConsole)"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::CoreinitLogging));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::CoreinitFile), _("&Coreinit File-Access API"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::CoreinitFile));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::ThreadSync), _("&Coreinit Thread-Synchronization API"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::ThreadSync));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::CoreinitMem), _("&Coreinit Memory API"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::CoreinitMem));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::CoreinitMP), _("&Coreinit MP API"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::CoreinitMP));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::CoreinitThread), _("&Coreinit Thread API"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::CoreinitThread));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::nn_nfp), _("&NN NFP"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::nn_nfp));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::GX2), _("&GX2 API"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::GX2));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::SoundAPI), _("&Audio API"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::SoundAPI));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::InputAPI), _("&Input API"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::InputAPI));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::Socket), _("&Socket API"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::Socket));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::Save), _("&Save API"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::Save));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::H264), _("&H264 API"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::H264));
 	debugLoggingMenu->AppendSeparator();
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_PATCHES, _("&Graphic pack patches"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_PATCHES));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_TEXTURE_CACHE, _("&Texture cache warnings"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_TEXTURE_CACHE));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::Patches), _("&Graphic pack patches"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::Patches));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::TextureCache), _("&Texture cache warnings"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::TextureCache));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::TextureReadback), _("&Texture readback"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::TextureReadback));
 	debugLoggingMenu->AppendSeparator();
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_OPENGL, _("&OpenGL debug output"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_OPENGL));
-	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_VULKAN_VALIDATION, _("&Vulkan validation layer (slow)"), wxEmptyString)->Check(cafeLog_isLoggingFlagEnabled(LOG_TYPE_VULKAN_VALIDATION));
-#ifdef CEMU_DEBUG_ASSERT
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::OpenGLLogging), _("&OpenGL debug output"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::OpenGLLogging));
+	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::VulkanValidation), _("&Vulkan validation layer (slow)"), wxEmptyString)->Check(cemuLog_isLoggingEnabled(LogType::VulkanValidation));
 	debugLoggingMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_ADVANCED_PPC_INFO, _("&Log PPC context for API"), wxEmptyString)->Check(cemuLog_advancedPPCLoggingEnabled());
-#endif
 	m_loggingSubmenu = debugLoggingMenu;
 	// debug->dump submenu
 	wxMenu* debugDumpMenu = new wxMenu;
@@ -2131,14 +2216,15 @@ void MainWindow::RecreateMenu()
 	audioAuxOnly->Check(ActiveSettings::AudioOutputOnlyAux());
 #endif
 
-#ifdef CEMU_DEBUG_ASSERT
 	debugMenu->Append(MAINFRAME_MENU_ID_DEBUG_VIEW_LOGGING_WINDOW, _("&Open logging window"));
-#endif
+	m_gdbstub_toggle = debugMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_TOGGLE_GDB_STUB, _("&Launch with GDB stub"), wxEmptyString);
+	m_gdbstub_toggle->Check(g_gdbstub != nullptr);
+	m_gdbstub_toggle->Enable(!m_game_launched);
+
 	debugMenu->Append(MAINFRAME_MENU_ID_DEBUG_VIEW_PPC_THREADS, _("&View PPC threads"));
 	debugMenu->Append(MAINFRAME_MENU_ID_DEBUG_VIEW_PPC_DEBUGGER, _("&View PPC debugger"));
 	debugMenu->Append(MAINFRAME_MENU_ID_DEBUG_VIEW_AUDIO_DEBUGGER, _("&View audio debugger"));
 	debugMenu->Append(MAINFRAME_MENU_ID_DEBUG_VIEW_TEXTURE_RELATIONS, _("&View texture cache info"));
-	debugMenu->AppendCheckItem(MAINFRAME_MENU_ID_DEBUG_SHOW_FRAME_PROFILER, _("&Show frame profiler"), wxEmptyString);
 	debugMenu->Append(MAINFRAME_MENU_ID_DEBUG_DUMP_RAM, _("&Dump current RAM"));
 	// debugMenu->Append(MAINFRAME_MENU_ID_DEBUG_DUMP_FST, _("&Dump WUD filesystem"))->Enable(false);
 
@@ -2166,8 +2252,8 @@ void MainWindow::RecreateMenu()
 		m_nfcMenu->Enable(MAINFRAME_MENU_ID_NFC_TOUCH_NFC_FILE, true);
 		
 		// disable OpenGL logging (currently cant be toggled after OpenGL backend is initialized)
-		m_loggingSubmenu->Enable(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_OPENGL, false);
-		m_loggingSubmenu->Enable(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + LOG_TYPE_VULKAN_VALIDATION, false);
+		m_loggingSubmenu->Enable(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::OpenGLLogging), false);
+		m_loggingSubmenu->Enable(MAINFRAME_MENU_ID_DEBUG_LOGGING0 + stdx::to_underlying(LogType::VulkanValidation), false);
 
 		UpdateNFCMenu();
 	}

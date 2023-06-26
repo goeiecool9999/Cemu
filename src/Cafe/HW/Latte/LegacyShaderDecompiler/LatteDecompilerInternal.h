@@ -25,9 +25,6 @@ struct LatteDecompilerALUInstruction
 		uint8 abs{};
 		uint8 neg{};
 		uint8 chan{};
-		// register backup information (used for instruction groups where the same register is read and written)
-		bool requiredRegisterBackup{};
-		uint8 registerBackupIndex{}; // index of the used register backup variable (at the beginning of the group the register value is copied to the temporary register with this index)
 	}sourceOperand[3];
 	union
 	{
@@ -70,8 +67,6 @@ struct LatteDecompilerTEXInstruction
 		uint8 nfa{};
 		uint8 isSigned{};
 	}memRead;
-	// custom shadow function
-	sint32 shadowFunctionIndex{};
 };
 
 struct LatteDecompilerCFInstruction
@@ -116,7 +111,7 @@ struct LatteDecompilerCFInstruction
 
 	~LatteDecompilerCFInstruction()
 	{
-		cemu_assert_debug(!(instructionsALU.size() != 0 && instructionsTEX.size() != 0)); // make sure we dont accidentally added the wrong instruction type
+		cemu_assert_debug(!(instructionsALU.size() != 0 && instructionsTEX.size() != 0)); // make sure we haven't accidentally added the wrong instruction type
 	}
 
 #if BOOST_OS_WINDOWS
@@ -148,14 +143,14 @@ struct LatteDecompilerShaderContext
 	LatteDecompilerOutput_t* output;
 	LatteDecompilerShader* shader;
 	LatteConst::ShaderType shaderType;
+	const class LatteDecompilerOptions* options;
 	uint32* contextRegisters; // deprecated
 	struct LatteContextRegister* contextRegistersNew;
 	uint64 shaderBaseHash;
-	StringBuf* shaderSource; // move to output struct
+	StringBuf* shaderSource;
 	std::vector<LatteDecompilerCFInstruction> cfInstructions;
 	// fetch shader (required for vertex shader)
-	LatteFetchShader* fetchShaderList[32];
-	sint32 fetchShaderCount;
+	LatteFetchShader* fetchShader{};
 	// geometry copy shader (only present when geometry shader is active)
 	LatteParsedGSCopyShader* parsedGSCopyShader;
 	// state
@@ -216,11 +211,8 @@ struct LatteDecompilerShaderContext
 	// emitter
 	bool hasUniformVarBlock;
 	sint32 currentBindingPointVK{};
-
-	// unsorted
-	bool usesGeometryShader; // for VS
-	bool useTFViaSSBO;
-	sint32 currentShadowFunctionIndex;
+	struct ALUClauseTemporariesState* aluPVPSState{nullptr};
+	// misc
 	std::vector<LatteDecompilerSubroutineInfo> list_subroutines;
 };
 

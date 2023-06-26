@@ -115,9 +115,9 @@ void DebugLogStackTrace(OSThread_t* thread, MPTR sp)
 
 void coreinitExport_OSPanic(PPCInterpreter_t* hCPU)
 {
-	debug_printf("OSPanic!\n");
-	debug_printf("File: %s:%d\n", memory_getPointerFromVirtualOffset(hCPU->gpr[3]), hCPU->gpr[4]);
-	debug_printf("Msg: %s\n", memory_getPointerFromVirtualOffset(hCPU->gpr[5]));
+	cemuLog_log(LogType::Force, "OSPanic!\n");
+    cemuLog_log(LogType::Force, "File: {}:{}\n", (const char*)memory_getPointerFromVirtualOffset(hCPU->gpr[3]), hCPU->gpr[4]);
+    cemuLog_log(LogType::Force, "Msg: {}\n", (const char*)memory_getPointerFromVirtualOffset(hCPU->gpr[5]));
 	DebugLogStackTrace(coreinit::OSGetCurrentThread(), coreinit::OSGetStackPointer());
 #ifdef CEMU_DEBUG_ASSERT
 	assert_dbg();
@@ -175,14 +175,14 @@ void coreinitExport_OSGetSharedData(PPCInterpreter_t* hCPU)
 		}
 	}
 	// some games require a valid result or they will crash, return a pointer to our placeholder font
-	forceLog_printf("OSGetSharedData() called by game but no shareddata fonts loaded. Use placeholder font");
+	cemuLog_log(LogType::Force, "OSGetSharedData() called by game but no shareddata fonts loaded. Use placeholder font");
 	if (placeholderFont == MPTR_NULL)
 	{
 		// load and then return placeholder font
 		uint8* placeholderFontPtr = extractCafeDefaultFont(&placeholderFontSize);
 		placeholderFont = coreinit_allocFromSysArea(placeholderFontSize, 256);
 		if (placeholderFont == MPTR_NULL)
-			forceLog_printf("Failed to alloc placeholder font sys memory");
+			cemuLog_log(LogType::Force, "Failed to alloc placeholder font sys memory");
 		memcpy(memory_getPointerFromVirtualOffset(placeholderFont), placeholderFontPtr, placeholderFontSize);
 		free(placeholderFontPtr);
 	}
@@ -204,7 +204,7 @@ typedef struct
 void coreinitExport_OSDriver_Register(PPCInterpreter_t* hCPU)
 {
 #ifdef CEMU_DEBUG_ASSERT
-	forceLog_printf("OSDriver_Register(0x%08x,0x%08x,0x%08x,0x%08x,0x%08x,0x%08x)", hCPU->gpr[3], hCPU->gpr[4], hCPU->gpr[5], hCPU->gpr[6], hCPU->gpr[7], hCPU->gpr[8]);
+	cemuLog_log(LogType::Force, "OSDriver_Register(0x{:08x},0x{:08x},0x{:08x},0x{:08x},0x{:08x},0x{:08x})", hCPU->gpr[3], hCPU->gpr[4], hCPU->gpr[5], hCPU->gpr[6], hCPU->gpr[7], hCPU->gpr[8]);
 #endif
 	OSDriverCallbacks_t* driverCallbacks = (OSDriverCallbacks_t*)memory_getPointerFromVirtualOffset(hCPU->gpr[5]);
 
@@ -257,7 +257,7 @@ namespace coreinit
 
 	void coreinitExport_ENVGetEnvironmentVariable(PPCInterpreter_t* hCPU)
 	{
-		forceLogDebug_printf("ENVGetEnvironmentVariable(\"%s\",0x08x,0x%x)\n", (char*)memory_getPointerFromVirtualOffset(hCPU->gpr[3]), hCPU->gpr[4], hCPU->gpr[5]);
+		cemuLog_logDebug(LogType::Force, "ENVGetEnvironmentVariable(\"{}\",0x08x,0x{:x})", (char*)memory_getPointerFromVirtualOffset(hCPU->gpr[3]), hCPU->gpr[4], hCPU->gpr[5]);
 		char* envKeyStr = (char*)memory_getPointerFromVirtualOffset(hCPU->gpr[3]);
 		char* outputString = (char*)memory_getPointerFromVirtualOffset(hCPU->gpr[4]);
 		sint32 outputStringMaxLen = (sint32)hCPU->gpr[5];
@@ -271,7 +271,8 @@ namespace coreinit
 
 	void coreinit_exit(uint32 r)
 	{
-		forceLog_printf("coreinit.exit(%d)", r);
+		cemuLog_log(LogType::Force, "The title terminated the process by calling coreinit.exit({})", (sint32)r);
+        DebugLogStackTrace(coreinit::OSGetCurrentThread(), coreinit::OSGetStackPointer());
 		cemu_assert_debug(false);
 		// never return
 		while (true) std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -284,13 +285,13 @@ namespace coreinit
 
 	uint32 OSGetBootPMFlags()
 	{
-		forceLogDebug_printf("OSGetBootPMFlags() - placeholder");
+		cemuLog_logDebug(LogType::Force, "OSGetBootPMFlags() - placeholder");
 		return 0;
 	}
 
 	uint32 OSGetSystemMode()
 	{
-		forceLogDebug_printf("OSGetSystemMode() - placeholder");
+		cemuLog_logDebug(LogType::Force, "OSGetSystemMode() - placeholder");
 		// if this returns 2, barista softlocks shortly after boot
 		return 0;
 	}
@@ -366,10 +367,11 @@ void coreinit_load()
 	coreinit::InitializeMessageQueue();
 	coreinit::InitializeIPC();
 	coreinit::InitializeIPCBuf();
+	coreinit::InitializeMemoryMapping();
 	coreinit::InitializeCodeGen();
 	coreinit::InitializeCoroutine();
 	coreinit::InitializeOSScreen();
-
+	
 	// legacy mem stuff
 	coreinit::expheap_load();
 

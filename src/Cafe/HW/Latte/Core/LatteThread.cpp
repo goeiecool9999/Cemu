@@ -117,19 +117,11 @@ int Latte_ThreadEntry()
 {
 	SetThreadName("LatteThread");
 	sint32 w,h;
-	gui_getWindowSize(&w,&h);
-
-	// imgui
-	ImGui::CreateContext();
-	ImGuiIO& io = ImGui::GetIO();
-	io.WantSaveIniSettings = false;
-	io.IniFilename = nullptr;
-	io.Fonts->AddFontDefault();
+	gui_getWindowPhysSize(w,h);
 
 	// renderer
 	g_renderer->Initialize();
 	RendererOutputShader::InitializeStatic();
-	io.DisplaySize = ImVec2((float)w, (float)h);
 
 	LatteTiming_Init();
 	LatteTexture_init();
@@ -171,7 +163,7 @@ int Latte_ThreadEntry()
 	sLatteThreadFinishedInit = true;
 
 	// register debug handler
-	if (cafeLog_isLoggingFlagEnabled(LOG_TYPE_OPENGL))
+	if (cemuLog_isLoggingEnabled(LogType::OpenGLLogging))
 		g_renderer->EnableDebugMode();
 
 	// wait till a game is started

@@ -68,6 +68,7 @@ bool LaunchSettings::HandleCommandline(const std::vector<std::wstring>& args)
 		("account,a", po::value<std::string>(), "Persistent id of account")
 
 		("force-interpreter", po::value<bool>()->implicit_value(true), "Force interpreter CPU emulation, disables recompiler")
+		("enable-gdbstub", po::value<bool>()->implicit_value(true), "Enable GDB stub to debug executables inside Cemu using an external debugger")
 
 		("act-url", po::value<std::string>(), "URL prefix for account server")
 		("ecs-url", po::value<std::string>(), "URL for ECS service");
@@ -162,6 +163,9 @@ bool LaunchSettings::HandleCommandline(const std::vector<std::wstring>& args)
 
 		if(vm.count("force-interpreter"))
 			s_force_interpreter = vm["force-interpreter"].as<bool>();
+		
+		if (vm.count("enable-gdbstub"))
+			s_enable_gdbstub = vm["enable-gdbstub"].as<bool>();
 
 		std::wstring extract_path, log_path;
 		std::string output_path;
@@ -248,7 +252,7 @@ bool LaunchSettings::ExtractorTool(std::wstring_view wud_path, std::string_view 
 		}
 		catch (const std::exception& ex)
 		{
-			forceLog_printf("can't write file: %s", ex.what());
+			cemuLog_log(LogType::Force, "can't write file: {}", ex.what());
 			puts(fmt::format("can't write file: %s\n", ex.what()).c_str());
 		}
 	}

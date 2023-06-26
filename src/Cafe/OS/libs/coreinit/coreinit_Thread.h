@@ -404,6 +404,18 @@ struct OSThread_t
 		return 0;
 	}
 
+    void SetMagic()
+    {
+        context.magic0 = OS_CONTEXT_MAGIC_0;
+        context.magic1 = OS_CONTEXT_MAGIC_1;
+        magic = 'tHrD';
+    }
+
+    bool IsValidMagic() const
+    {
+        return magic == 'tHrD' && context.magic0 == OS_CONTEXT_MAGIC_0 && context.magic1 == OS_CONTEXT_MAGIC_1;
+    }
+
 	/* +0x000 */ OSContext_t						context;
 	/* +0x320 */ uint32be							magic;								// 'tHrD'
 	/* +0x324 */ betype<THREAD_STATE>				state;
@@ -428,8 +440,8 @@ struct OSThread_t
 
 	/* +0x38C */ coreinit::OSThreadLink				activeThreadChain;					// queue of active threads (g_activeThreadQueue)
 
-	/* +0x394 */ MPTR_UINT8							stackBase;							// upper limit of stack
-	/* +0x398 */ MPTR_UINT32						stackEnd;							// lower limit of stack
+	/* +0x394 */ MPTR								stackBase;							// upper limit of stack
+	/* +0x398 */ MPTR								stackEnd;							// lower limit of stack
 
 	/* +0x39C */ MPTR								entrypoint;
 	/* +0x3A0 */ crt_t								crt;
@@ -443,8 +455,7 @@ struct OSThread_t
 	/* +0x5C8 */ uint32								userStackPointer;
 
 	/* +0x5CC */ MEMPTR<void>						cleanupCallback2;
-	/* +0x5D0 */ //MPTR								deallocator;
-	MEMPTR<void> deallocatorFunc;
+	/* +0x5D0 */ MEMPTR<void>						deallocatorFunc;
 
 	/* +0x5D4 */ uint32								stateFlags;						// 0x5D4 | various flags? Controls if canceling/suspension is allowed (at cancel points) or not? If 1 -> Cancel/Suspension not allowed, if 0 -> Cancel/Suspension allowed
 	/* +0x5D8 */ betype<REQUEST_FLAG_BIT>			requestFlags;
@@ -462,10 +473,10 @@ struct OSThread_t
 	/* +0x628 */ uint64								wakeTimeRelatedUkn2;
 
 	// set via OSSetExceptionCallback
-	/* +0x630 */ MPTR								ukn630Callback[Espresso::CORE_COUNT];
-	/* +0x63C */ MPTR								ukn63CCallback[Espresso::CORE_COUNT];
-	/* +0x648 */ MPTR								ukn648Callback[Espresso::CORE_COUNT];
-	/* +0x654 */ MPTR								ukn654Callback[Espresso::CORE_COUNT];
+	/* +0x630 */ MPTR								dsiCallback[Espresso::CORE_COUNT];
+	/* +0x63C */ MPTR								isiCallback[Espresso::CORE_COUNT];
+	/* +0x648 */ MPTR								programCallback[Espresso::CORE_COUNT];
+	/* +0x654 */ MPTR								perfMonCallback[Espresso::CORE_COUNT];
 
 	/* +0x660 */ uint32								ukn660;
 
@@ -487,6 +498,8 @@ namespace coreinit
 {
 	void InitializeThread();
 	void InitializeConcurrency();
+
+	bool __CemuIsMulticoreMode();
 
 	OSThread_t* OSGetDefaultThread(sint32 coreIndex);
 	void* OSGetDefaultThreadStack(sint32 coreIndex, uint32& size);
@@ -513,6 +526,7 @@ namespace coreinit
 	sint32 OSResumeThread(OSThread_t* thread);
 	void OSContinueThread(OSThread_t* thread);
 	void __OSSuspendThreadInternal(OSThread_t* thread);
+	void __OSSuspendThreadNolock(OSThread_t* thread);
 	void OSSuspendThread(OSThread_t* thread);
 	void OSSleepThread(OSThreadQueue* threadQueue);
 	void OSWakeupThread(OSThreadQueue* threadQueue);
@@ -524,6 +538,8 @@ namespace coreinit
 
 	bool OSIsThreadTerminated(OSThread_t* thread);
 	bool OSIsThreadSuspended(OSThread_t* thread);
+    bool OSIsThreadRunningNoLock(OSThread_t* thread);
+	bool OSIsThreadRunning(OSThread_t* thread);
 
 	// OSThreadQueue
 	void OSInitThreadQueue(OSThreadQueue* threadQueue);
@@ -588,6 +604,8 @@ namespace coreinit
 	void __OSAddReadyThreadToRunQueue(OSThread_t* thread);
 	bool __OSCoreShouldSwitchToThread(OSThread_t* currentThread, OSThread_t* newThread);
 	void __OSQueueThreadDeallocation(OSThread_t* thread);
+
+    bool __OSIsThreadActive(OSThread_t* thread);
 }
 
 #pragma pack()

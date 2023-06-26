@@ -8,11 +8,10 @@
 #include "Cafe/OS/libs/coreinit/coreinit_CodeGen.h"
 #include "config/ActiveSettings.h"
 #include "config/LaunchSettings.h"
-
-#include "util/helpers/fspinlock.h"
 #include "Common/ExceptionHandler/ExceptionHandler.h"
+#include "Common/cpu_features.h"
+#include "util/helpers/fspinlock.h"
 #include "util/helpers/helpers.h"
-
 #include "util/MemMapper/MemMapper.h"
 
 struct PPCInvalidationRange
@@ -83,7 +82,7 @@ void PPCRecompiler_enter(PPCInterpreter_t* hCPU, PPCREC_JUMP_ENTRY funcPtr)
 	{
 		auto t = std::chrono::high_resolution_clock::now();
 		auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t.time_since_epoch()).count();
-		forceLog_printf("Recompiler exit: 0x%08x LR: 0x%08x Timestamp %lld.%04lld", hCPU->instructionPointer, hCPU->spr.LR, dur / 1000LL, (dur % 1000LL));
+		cemuLog_log(LogType::Force, "Recompiler exit: 0x{:08x} LR: 0x{:08x} Timestamp {}.{:04}", hCPU->instructionPointer, hCPU->spr.LR, dur / 1000LL, (dur % 1000LL));
 	}
 	#endif
 #else
@@ -133,7 +132,7 @@ PPCRecFunction_t* PPCRecompiler_recompileFunction(PPCFunctionBoundaryTracker::PP
 {
 	if (range.startAddress >= PPC_REC_CODE_AREA_END)
 	{
-		cemuLog_force("Attempting to recompile function outside of allowed code area");
+		cemuLog_log(LogType::Force, "Attempting to recompile function outside of allowed code area");
 		return nullptr;
 	}
 
@@ -342,7 +341,7 @@ void PPCRecompiler_reserveLookupTableBlock(uint32 offset)
 	void* p3 = MemMapper::AllocateMemory(&(ppcRecompilerInstanceData->ppcRecompilerDirectJumpTable[offset/4]), (PPC_REC_ALLOC_BLOCK_SIZE/4)*sizeof(void*), MemMapper::PAGE_PERMISSION::P_RW, true);
 	if( !p1 || !p3 )
 	{
-		forceLog_printf("Failed to allocate memory for recompiler (0x%08x)", offset);
+		cemuLog_log(LogType::Force, "Failed to allocate memory for recompiler (0x{:08x})", offset);
 		cemu_assert(false);
 		return;
 	}
@@ -461,6 +460,20 @@ void PPCRecompiler_invalidateRange(uint32 startAddr, uint32 endAddr)
 	PPCRecompilerState.recompilerSpinlock.unlock();
 }
 
+#if defined(ARCH_X86_64)
+void PPCRecompiler_initPlatform()
+{
+	// mxcsr
+	ppcRecompilerInstanceData->_x64XMM_mxCsr_ftzOn = 0x1F80 | 0x8000;
+	ppcRecompilerInstanceData->_x64XMM_mxCsr_ftzOff = 0x1F80;
+}
+#else
+void PPCRecompiler_initPlatform()
+{
+    
+}
+#endif
+
 void PPCRecompiler_init()
 {
 	if (ActiveSettings::GetCPUMode() == CPUMode::SinglecoreInterpreter)
@@ -487,7 +500,7 @@ void PPCRecompiler_init()
 	codeRegionEnd = (codeRegionEnd + PPC_REC_ALLOC_BLOCK_SIZE - 1) & ~(PPC_REC_ALLOC_BLOCK_SIZE - 1);
 
 	uint32 codeRegionSize = codeRegionEnd - PPC_REC_CODE_AREA_START;
-	forceLogDebug_printf("Allocating recompiler tables for range 0x%08x-0x%08x", PPC_REC_CODE_AREA_START, codeRegionEnd);
+	cemuLog_logDebug(LogType::Force, "Allocating recompiler tables for range 0x{:08x}-0x{:08x}", PPC_REC_CODE_AREA_START, codeRegionEnd);
 
 	for (uint32 i = 0; i < codeRegionSize; i += PPC_REC_ALLOC_BLOCK_SIZE)
 	{
@@ -569,21 +582,9 @@ void PPCRecompiler_init()
 		ppcRecompilerInstanceData->_psq_st_scale_ps0_ps1[(i + 32) * 2 + 1] = br;
 	}
 
-	// mxcsr
-	ppcRecompilerInstanceData->_x64XMM_mxCsr_ftzOn = 0x1F80 | 0x8000;
-	ppcRecompilerInstanceData->_x64XMM_mxCsr_ftzOff = 0x1F80;
-
-	// query processor extensions
-	int cpuInfo[4];
-	cpuid(cpuInfo, 0x80000001);
-	hasLZCNTSupport = ((cpuInfo[2] >> 5) & 1) != 0;
-	cpuid(cpuInfo, 0x1);
-	hasMOVBESupport = ((cpuInfo[2] >> 22) & 1) != 0;
-	hasAVXSupport = ((cpuInfo[2] >> 28) & 1) != 0;
-	cpuidex(cpuInfo, 0x7, 0);
-	hasBMI2Support = ((cpuInfo[1] >> 8) & 1) != 0;
-
-	forceLog_printf("Recompiler initialized. CPU extensions: %s%s%s", hasLZCNTSupport ? "LZCNT " : "", hasMOVBESupport ? "MOVBE " : "", hasAVXSupport ? "AVX " : "");
+    PPCRecompiler_initPlatform();
+    
+	cemuLog_log(LogType::Force, "Recompiler initialized");
 
 	ppcRecompilerEnabled = true;
 

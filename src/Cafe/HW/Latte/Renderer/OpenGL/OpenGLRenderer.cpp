@@ -25,8 +25,10 @@
 #define STRINGIFY(X) STRINGIFY2(X)
 
 #define GLFUNC(__type, __name)	__type __name;
+#define EGLFUNC(__type, __name)	__type __name;
 #include "Common/GLInclude/glFunctions.h"
 #undef GLFUNC
+#undef EGLFUNC
 
 #include "config/ActiveSettings.h"
 #include "config/LaunchSettings.h"
@@ -87,7 +89,7 @@ OpenGLRenderer::OpenGLRenderer()
 		void* buffer = glMapNamedBufferRange(glRendererState.uploadBuffer, 0, TEXBUFFER_SIZE, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_FLUSH_EXPLICIT_BIT);
 		if (buffer == nullptr)
 		{
-			forceLog_printf("Failed to allocate GL texture upload buffer. Using traditional API instead");
+			cemuLog_log(LogType::Force, "Failed to allocate GL texture upload buffer. Using traditional API instead");
 			cemu_assert_debug(false);
 		}
 		glRendererState.uploadBufferPtr = buffer;
@@ -102,7 +104,7 @@ OpenGLRenderer::OpenGLRenderer()
 	}
 	catch (const std::exception& ex)
 	{
-		forceLog_printf("Unable to create dxgi wrapper: %s (VRAM overlay stat won't be available)", ex.what());
+		cemuLog_log(LogType::Force, "Unable to create dxgi wrapper: {} (VRAM overlay stat won't be available)", ex.what());
 	}
 #endif
 }
@@ -229,9 +231,17 @@ void LoadOpenGLImports()
 		_glXGetProcAddress = (PFNGLXGETPROCADDRESSPROC)dlsym(libGL, "glXGetProcAddressARB");
 	}
 
+	void* libEGL = dlopen("libEGL.so.1", RTLD_NOW | RTLD_GLOBAL);
+	if(!libEGL)
+	{
+		libGL = dlopen("libEGL.so", RTLD_NOW | RTLD_GLOBAL);
+	}
+
 #define GLFUNC(__type, __name)	__name = (__type)_GetOpenGLFunction(libGL, _glXGetProcAddress, STRINGIFY(__name));
+#define EGLFUNC(__type, __name)	__name = (__type)dlsym(libEGL, STRINGIFY(__name));
 #include "Common/GLInclude/glFunctions.h"
 #undef GLFUNC
+#undef EGLFUNC
 }
 #elif BOOST_OS_MACOS
 void LoadOpenGLImports()
@@ -242,8 +252,9 @@ void LoadOpenGLImports()
 
 void OpenGLRenderer::Initialize()
 {
-	auto lock = cafeLog_acquire();
-	forceLog_printf("------- Init OpenGL graphics backend -------");
+	Renderer::Initialize();
+	auto lock = cemuLog_acquire();
+	cemuLog_log(LogType::Force, "------- Init OpenGL graphics backend -------");
 
 	GLCanvas_MakeCurrent(false);
 	LoadOpenGLImports();
@@ -257,12 +268,12 @@ void OpenGLRenderer::Initialize()
 	if (glMaxShaderCompilerThreadsARB)
 		glMaxShaderCompilerThreadsARB(0xFFFFFFFF);
 
-	forceLog_printf("OpenGL extensions:");
-	forceLog_printf("ARB_clip_control: %s", glClipControl ? "available" : "not supported");
-	forceLog_printf("ARB_get_program_binary: %s", (glGetProgramBinary != NULL && glProgramBinary != NULL) ? "available" : "not supported");
-	forceLog_printf("ARB_clear_texture: %s", (glClearTexImage != NULL) ? "available" : "not supported");
-	forceLog_printf("ARB_copy_image: %s", (glCopyImageSubData != NULL) ? "available" : "not supported");
-	forceLog_printf("NV_depth_buffer_float: %s", (glDepthRangedNV != NULL) ? "available" : "not supported");
+	cemuLog_log(LogType::Force, "OpenGL extensions:");
+	cemuLog_log(LogType::Force, "ARB_clip_control: {}", glClipControl ? "available" : "not supported");
+	cemuLog_log(LogType::Force, "ARB_get_program_binary: {}", (glGetProgramBinary != NULL && glProgramBinary != NULL) ? "available" : "not supported");
+	cemuLog_log(LogType::Force, "ARB_clear_texture: {}", (glClearTexImage != NULL) ? "available" : "not supported");
+	cemuLog_log(LogType::Force, "ARB_copy_image: {}", (glCopyImageSubData != NULL) ? "available" : "not supported");
+	cemuLog_log(LogType::Force, "NV_depth_buffer_float: {}", (glDepthRangedNV != NULL) ? "available" : "not supported");
 
 	// generate default frame buffer
 	glGenFramebuffers(1, &m_defaultFramebufferId);
@@ -352,15 +363,6 @@ void OpenGLRenderer::NotifyLatteCommandProcessorIdle()
 	glFlush();
 }
 
-void OpenGLRenderer::EnableVSync(int state)
-{
-#if BOOST_OS_WINDOWS
-	if(wglSwapIntervalEXT)
-		wglSwapIntervalEXT(state); // 1 = enabled, 0 = disabled
-#else
-	cemuLog_log(LogType::Force, "OpenGL vsync not implemented");
-#endif
-}
 
 bool IsRunningInWine();
 
@@ -374,9 +376,9 @@ void OpenGLRenderer::GetVendorInformation()
 	char* glRendererString = (char*)glGetString(GL_RENDERER);
 	char* glVersionString = (char*)glGetString(GL_VERSION);
 
-	forceLog_printf("GL_VENDOR: %s", glVendorString ? glVendorString : "unknown");
-	forceLog_printf("GL_RENDERER: %s", glRendererString ? glRendererString : "unknown");
-	forceLog_printf("GL_VERSION: %s", glVersionString ? glVersionString : "unknown");
+	cemuLog_log(LogType::Force, "GL_VENDOR: {}", glVendorString ? glVendorString : "unknown");
+	cemuLog_log(LogType::Force, "GL_RENDERER: {}", glRendererString ? glRendererString : "unknown");
+	cemuLog_log(LogType::Force, "GL_VERSION: {}", glVersionString ? glVersionString : "unknown");
 
 	if(boost::icontains(glVersionString, "Mesa"))
 	{
@@ -422,7 +424,7 @@ void _glDebugCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GL
 	if (LatteGPUState.glVendor == GLVENDOR_NVIDIA && strstr(message, "does not have a defined base level"))
 		return;
 
-	forceLog_printf("GLDEBUG: %s", message);
+	cemuLog_log(LogType::Force, "GLDEBUG: {}", message);
 
 	cemu_assert_debug(false);
 }
@@ -555,9 +557,9 @@ void OpenGLRenderer::DrawBackbufferQuad(LatteTextureView* texView, RendererOutpu
 	{
 		int windowWidth, windowHeight;
 		if (padView)
-			gui_getPadWindowSize(&windowWidth, &windowHeight);
+			gui_getPadWindowPhysSize(windowWidth, windowHeight);
 		else
-			gui_getWindowSize(&windowWidth, &windowHeight);
+			gui_getWindowPhysSize(windowWidth, windowHeight);
 		g_renderer->renderTarget_setViewport(0, 0, windowWidth, windowHeight, 0.0f, 1.0f);
 		g_renderer->ClearColorbuffer(padView);
 	}
@@ -1073,7 +1075,7 @@ void OpenGLRenderer_texture_loadSlice_normal(LatteTexture* hostTextureGeneric, s
 			if (mipIndex < hostTexture->maxPossibleMipLevels)
 				glTexSubImage2D(GL_TEXTURE_2D, mipIndex, 0, 0, effectiveWidth, effectiveHeight, glFormatInfo.glSuppliedFormat, glFormatInfo.glSuppliedFormatType, pixelData);
 			else
-				forceLogDebug_printf("2D texture mip level allocated out of range");
+				cemuLog_logDebug(LogType::Force, "2D texture mip level allocated out of range");
 		}
 	}
 	else if (hostTexture->dim == Latte::E_DIM::DIM_1D)
@@ -1199,12 +1201,12 @@ void OpenGLRenderer::texture_clearSlice(LatteTexture* hostTextureGeneric, sint32
 	{
 		if (formatInfoGL.glIsCompressed)
 		{
-			forceLogDebug_printf("Unsupported clear for compressed texture");
+			cemuLog_logDebug(LogType::Force, "Unsupported clear for compressed texture");
 			return; // todo - create integer texture view to clear compressed textures
 		}
 		if (hostTextureGeneric->isDepth)
 		{
-			forceLogDebug_printf("Unsupported clear for depth texture");
+			cemuLog_logDebug(LogType::Force, "Unsupported clear for depth texture");
 			return; // todo - use depth clear
 		}
 
@@ -1363,7 +1365,7 @@ void OpenGLRenderer::texture_copyImageSubData(LatteTexture* src, sint32 srcMip, 
 		}
 		else
 		{
-			forceLogDebug_printf("_syncSlice() called with unhandled alternative format");
+			cemuLog_logDebug(LogType::Force, "_syncSlice() called with unhandled alternative format");
 			return;
 		}
 	}

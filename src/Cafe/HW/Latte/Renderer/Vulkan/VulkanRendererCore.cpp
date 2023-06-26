@@ -15,7 +15,7 @@
 
 #include <renderdoc_app.h>
 extern RENDERDOC_API_1_1_2 *rdoc_api;
-extern bool discardCapture = true;
+extern bool discardCapture;
 
 extern bool hasValidFramebufferAttached;
 
@@ -681,7 +681,7 @@ VkDescriptorSetInfo* VulkanRenderer::draw_getOrCreateDescriptorSet(PipelineInfo*
 			info.imageView = nullTexture1D.view;
 			info.sampler = nullTexture1D.sampler;
 			textureArray.emplace_back(info);
-			// forceLog_printf("Vulkan-Info: Shader 0x%016llx uses 1D texture but bound texture has mismatching type (dim: 0x%02x)", shader->baseHash, textureView->gx2Dim);
+			// cemuLog_log(LogType::Force, "Vulkan-Info: Shader 0x{:016x} uses 1D texture but bound texture has mismatching type (dim: 0x{:02x})", shader->baseHash, textureView->gx2Dim);
 			continue;
 		}
 		else if (textureDim == Latte::E_DIM::DIM_2D && (textureView->dim != Latte::E_DIM::DIM_2D && textureView->dim != Latte::E_DIM::DIM_2D_MSAA))
@@ -692,7 +692,7 @@ VkDescriptorSetInfo* VulkanRenderer::draw_getOrCreateDescriptorSet(PipelineInfo*
 			info.imageView = nullTexture2D.view;
 			info.sampler = nullTexture2D.sampler;
 			textureArray.emplace_back(info);
-			// forceLog_printf("Vulkan-Info: Shader 0x%016llx uses 2D texture but bound texture has mismatching type (dim: 0x%02x)", shader->baseHash, textureView->gx2Dim);
+			// cemuLog_log(LogType::Force, "Vulkan-Info: Shader 0x{:016x} uses 2D texture but bound texture has mismatching type (dim: 0x{:02x})", shader->baseHash, textureView->gx2Dim);
 			continue;
 		}
 
@@ -1201,37 +1201,22 @@ void VulkanRenderer::draw_setRenderPass()
 		if (j.texture && j.texture->baseTexture->physAddress == 0xa9500800)
 		{
 			discardCapture = false;
-			cemuLog_force("rendering to terrain normal map, do not discard");
+			std::cout << ("rendering to terrain normal map, do not discard") << std::endl;
 		}
 	}
 
 	// update self-dependency flag
 	if (m_state.descriptorSetsChanged || m_state.activeRenderpassFBO != fboVk)
 	{
-		bool hadDep = m_state.hasRenderSelfDependency;
 		m_state.hasRenderSelfDependency = fboVk->CheckForCollision(m_state.activeVertexDS, m_state.activeGeometryDS, m_state.activePixelDS);
 	}
 
 	auto vkObjRenderPass = fboVk->GetRenderPassObj();
 	auto vkObjFramebuffer = fboVk->GetFramebufferObj();
 
-	if (m_state.hasRenderSelfDependency)
-	{
-		bool triggerBarrier = GetConfig().vk_accurate_barriers || m_state.activePipelineInfo->neverSkipAccurateBarrier;
-		if (triggerBarrier)
-		{
-			VkMemoryBarrier memoryBarrier{};
-			memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-			memoryBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-			memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-			VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-			vkCmdPipelineBarrier(m_state.currentCommandBuffer, srcStage, dstStage, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
-			performanceMonitor.vk.numDrawBarriersPerFrame.increment();
-		}
-	}
+	bool overridePassReuse = m_state.hasRenderSelfDependency && (GetConfig().vk_accurate_barriers || m_state.activePipelineInfo->neverSkipAccurateBarrier);
 
-	if (m_state.activeRenderpassFBO == fboVk)
+	if (!overridePassReuse && m_state.activeRenderpassFBO == fboVk)
 	{
 		if (m_state.descriptorSetsChanged)
 			sync_inputTexturesChanged();
@@ -1606,7 +1591,7 @@ void VulkanRenderer::draw_updateVertexBuffersDirectAccess()
 
 		if (bufferAddress == MPTR_NULL)
 		{
-			cemu_assert_unimplemented();
+			bufferAddress = 0x10000000;
 		}
 		if (m_state.currentVertexBinding[bufferIndex].offset == bufferAddress)
 			continue;

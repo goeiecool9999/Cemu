@@ -1,6 +1,9 @@
 add_library(CemuCommon 
   betype.h
+  cpu_features.cpp
+  cpu_features.h
   enumFlags.h
+  ExceptionHandler/ExceptionHandler.cpp
   ExceptionHandler/ExceptionHandler.h
   FileStream.h
   GLInclude/glext.h
@@ -18,7 +21,6 @@ add_library(CemuCommon
   SysAllocator.cpp
   SysAllocator.h
   version.h
-  zstring_view.h
 )
 
 set_property(TARGET CemuCommon PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

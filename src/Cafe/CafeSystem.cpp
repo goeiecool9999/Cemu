@@ -5,6 +5,7 @@
 #include "Cafe/HW/Espresso/Interpreter/PPCInterpreterInternal.h"
 #include "Cafe/HW/Espresso/Recompiler/PPCRecompiler.h"
 #include "audio/IAudioAPI.h"
+#include "audio/IAudioInputAPI.h"
 #include "Cafe/HW/Espresso/Debugger/Debugger.h"
 
 #include "config/ActiveSettings.h"
@@ -29,6 +30,7 @@
 #include "GamePatch.h"
 
 #include <time.h>
+#include "HW/Espresso/Debugger/GDBStub.h"
 
 #include "Cafe/IOSU/legacy/iosu_ioctl.h"
 #include "Cafe/IOSU/legacy/iosu_act.h"
@@ -131,7 +133,7 @@ void LoadMainExecutable()
 		// otherwise search for first file with .rpx extension in the code folder
 		if (!ScanForRPX())
 		{
-			forceLog_printf("Unable to find RPX executable");
+			cemuLog_log(LogType::Force, "Unable to find RPX executable");
 			cemuLog_waitForFlush();
 			cemu_assert(false);
 		}
@@ -141,7 +143,7 @@ void LoadMainExecutable()
 	uint8* rpxData = fsc_extractFile(_pathToExecutable.c_str(), &rpxSize);
 	if (rpxData == nullptr)
 	{
-		forceLog_printf("Failed to load \"%s\"", _pathToExecutable.c_str());
+		cemuLog_log(LogType::Force, "Failed to load \"{}\"", _pathToExecutable);
 		cemuLog_waitForFlush();
 		cemu_assert(false);
 	}
@@ -209,7 +211,7 @@ void InfoLog_TitleLoaded()
 	fs::path effectiveSavePath = getTitleSavePath();
 	std::error_code ec;
 	const bool saveDirExists = fs::exists(effectiveSavePath, ec);
-	cemuLog_force("Save path:   {}{}", _pathToUtf8(effectiveSavePath), saveDirExists ? "" : " (not present)");
+	cemuLog_log(LogType::Force, "Save path:   {}{}", _pathToUtf8(effectiveSavePath), saveDirExists ? "" : " (not present)");
 
 	// log shader cache name
 	cemuLog_log(LogType::Force, "Shader cache file: shaderCache/transferable/{:016x}.bin", titleId);
@@ -230,21 +232,21 @@ void InfoLog_TitleLoaded()
 void InfoLog_PrintActiveSettings()
 {
 	const auto& config = GetConfig();
-	forceLog_printf("------- Active settings -------");
+	cemuLog_log(LogType::Force, "------- Active settings -------");
 
 	// settings to log:
-	forceLog_printf("CPU-Mode: %s%s", fmt::format("{}", ActiveSettings::GetCPUMode()).c_str(), g_current_game_profile->GetCPUMode().has_value() ? " (gameprofile)" : "");
-	forceLog_printf("Load shared libraries: %s%s", ActiveSettings::LoadSharedLibrariesEnabled() ? "true" : "false", g_current_game_profile->ShouldLoadSharedLibraries().has_value() ? " (gameprofile)" : "");
-	forceLog_printf("Use precompiled shaders: %s%s", fmt::format("{}", ActiveSettings::GetPrecompiledShadersOption()).c_str(), g_current_game_profile->GetPrecompiledShadersState().has_value() ? " (gameprofile)" : "");
-	forceLog_printf("Full sync at GX2DrawDone: %s", ActiveSettings::WaitForGX2DrawDoneEnabled() ? "true" : "false");
+	cemuLog_log(LogType::Force, "CPU-Mode: {}{}", fmt::format("{}", ActiveSettings::GetCPUMode()).c_str(), g_current_game_profile->GetCPUMode().has_value() ? " (gameprofile)" : "");
+	cemuLog_log(LogType::Force, "Load shared libraries: {}{}", ActiveSettings::LoadSharedLibrariesEnabled() ? "true" : "false", g_current_game_profile->ShouldLoadSharedLibraries().has_value() ? " (gameprofile)" : "");
+	cemuLog_log(LogType::Force, "Use precompiled shaders: {}{}", fmt::format("{}", ActiveSettings::GetPrecompiledShadersOption()), g_current_game_profile->GetPrecompiledShadersState().has_value() ? " (gameprofile)" : "");
+	cemuLog_log(LogType::Force, "Full sync at GX2DrawDone: {}", ActiveSettings::WaitForGX2DrawDoneEnabled() ? "true" : "false");
+	cemuLog_log(LogType::Force, "Strict shader mul: {}", g_current_game_profile->GetAccurateShaderMul() == AccurateShaderMulOption::True ? "true" : "false");
 	if (ActiveSettings::GetGraphicsAPI() == GraphicAPI::kVulkan)
 	{
-		forceLog_printf("Async compile: %s", GetConfig().async_compile.GetValue() ? "true" : "false");
+		cemuLog_log(LogType::Force, "Async compile: {}", GetConfig().async_compile.GetValue() ? "true" : "false");
 		if(!GetConfig().vk_accurate_barriers.GetValue())
-			forceLog_printf("Accurate barriers are disabled!");
+			cemuLog_log(LogType::Force, "Accurate barriers are disabled!");
 	}
-
-	forceLog_printf("Console language: %s", fmt::format("{}", config.console_language).c_str());
+	cemuLog_log(LogType::Force, "Console language: {}", config.console_language);
 }
 
 void PPCCore_setupSPR(PPCInterpreter_t* hCPU, uint32 coreIndex)
@@ -336,7 +338,7 @@ uint32 loadSharedData()
 			// advance write offset and pad to 16 byte alignment
 			dataWritePtr += ((fileSize + 15) & ~15);
 		}
-		forceLog_printfW(L"COS: System fonts found. Generated shareddata (%dKB)", (uint32)(dataWritePtr - (uint8*)shareddataTable) / 1024);
+		cemuLog_log(LogType::Force, "COS: System fonts found. Generated shareddata ({}KB)", (uint32)(dataWritePtr - (uint8*)shareddataTable) / 1024);
 		return memory_getVirtualOffsetFromPointer(dataWritePtr);
 	}
 	// alternative method: load RAM dump
@@ -381,7 +383,7 @@ void cemu_initForGame()
 	RPLLoader_Link();
 	RPLLoader_NotifyControlPassedToApplication();
 	uint32 linkTime = GetTickCount() - linkTimeStart;
-	forceLog_printf("RPL link time: %dms", linkTime);
+	cemuLog_log(LogType::Force, "RPL link time: {}ms", linkTime);
 	// for HBL ELF: Setup OS-specifics struct
 	if (isLaunchTypeELF)
 	{
@@ -393,17 +395,24 @@ void cemu_initForGame()
 		// replace any known function signatures with our HLE implementations and patch bugs in the games
 		GamePatch_scan();
 	}
+	LatteGPUState.alwaysDisplayDRC = ActiveSettings::DisplayDRCEnabled();
 	InfoLog_PrintActiveSettings();
 	Latte_Start();
 	// check for debugger entrypoint bp
+    if (g_gdbstub)
+    {
+        g_gdbstub->HandleEntryStop(_entryPoint);
+        g_gdbstub->Initialize();
+    }
 	debugger_handleEntryBreakpoint(_entryPoint);
 	// load graphic packs
-	forceLog_printf("------- Activate graphic packs -------");
+	cemuLog_log(LogType::Force, "------- Activate graphic packs -------");
 	GraphicPack2::ActivateForCurrentTitle();
 	// print audio log
 	IAudioAPI::PrintLogging();
+	IAudioInputAPI::PrintLogging();
 	// everything initialized
-	forceLog_printf("------- Run title -------");
+	cemuLog_log(LogType::Force, "------- Run title -------");
 	// wait till GPU thread is initialized
 	while (g_isGPUInitFinished == false) std::this_thread::sleep_for(std::chrono::milliseconds(50));
 	// init initial thread
@@ -712,6 +721,13 @@ namespace CafeSystem
 		if (applicationName.empty()) //Unknown Game
 			applicationName = "Unknown Game";
 		return applicationName;
+	}
+
+	uint32 GetForegroundTitleOlvAccesskey()
+	{
+		if (sLaunchModeIsStandalone)
+			return -1;
+		return sGameInfo_ForegroundTitle.GetBase().GetMetaInfo()->GetOlvAccesskey();
 	}
 
 	std::string GetForegroundTitleArgStr()

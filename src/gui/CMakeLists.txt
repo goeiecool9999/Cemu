@@ -69,6 +69,8 @@ add_library(CemuGui
   helpers/wxHelpers.cpp
   helpers/wxHelpers.h
   helpers/wxLogEvent.h
+  helpers/wxWayland.cpp
+  helpers/wxWayland.h
   input/InputAPIAddWindow.cpp
   input/InputAPIAddWindow.h
   input/InputSettings2.cpp
@@ -147,10 +149,23 @@ target_link_libraries(CemuGui PRIVATE
 	ZArchive::zarchive
 )
 
+if(ENABLE_WXWIDGETS AND UNIX AND NOT APPLE)
+	# PUBLIC because gdk/gdkkeysyms.h is included in guiWrapper.h
+	target_link_libraries(CemuGui PUBLIC GTK3::gtk)
+  if (ENABLE_WAYLAND)
+    target_link_libraries(CemuGui PRIVATE Wayland::Client CemuWaylandProtocols)
+  endif()
+endif()
+
 if(ENABLE_CUBEB)
 	target_link_libraries(CemuGui PRIVATE cubeb::cubeb)
 endif()
 
+if(UNIX AND NOT APPLE)
+	if(ENABLE_FERAL_GAMEMODE)
+		target_link_libraries(CemuGui PRIVATE gamemode)
+	endif()
+endif()
 if (ENABLE_WXWIDGETS)
 	# PUBLIC because wx/app.h is included in CemuApp.h
 	target_link_libraries(CemuGui PUBLIC wx::base wx::core wx::gl wx::propgrid wx::xrc)

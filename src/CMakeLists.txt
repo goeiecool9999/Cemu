@@ -11,11 +11,6 @@ endif()
 
 if(MSVC)
 	add_compile_definitions(WIN32_LEAN_AND_MEAN CURL_STATICLIB)
-	#add_compile_definitions(VK_USE_PLATFORM_WIN32_KHR)
-	# _CRT_SECURE_NO_WARNINGS
-	# _WINSOCK_DEPRECATED_NO_WARNINGS
-	# _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING
-	# _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS
 elseif(UNIX)
 	if(APPLE)
 		add_compile_definitions(
@@ -28,8 +23,10 @@ elseif(UNIX)
 			VK_USE_PLATFORM_XLIB_KHR # legacy. Do we need to support XLIB surfaces?
 			VK_USE_PLATFORM_XCB_KHR
 		)
+		if (ENABLE_WAYLAND)
+			add_compile_definitions(VK_USE_PLATFORM_WAYLAND_KHR)
+		endif()
 	endif()
-	add_compile_options(-maes)
 	# warnings
 	if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
 		add_compile_options(-Wno-ambiguous-reversed-operator)
@@ -75,6 +72,13 @@ if (MACOS_BUNDLE)
 	set(RESOURCE_FILES "${CMAKE_SOURCE_DIR}/src/resource/cemu.icns")
 	target_sources(CemuBin PRIVATE "${RESOURCE_FILES}")
 
+	set(MACOSX_BUNDLE_ICON_FILE "cemu.icns")
+	set(MACOSX_BUNDLE_GUI_IDENTIFIER "info.cemu.Cemu")
+	set(MACOSX_BUNDLE_BUNDLE_NAME "Cemu")
+	set(MACOSX_BUNDLE_SHORT_VERSION_STRING ${CMAKE_PROJECT_VERSION})
+	set(MACOSX_BUNDLE_BUNDLE_VERSION ${CMAKE_PROJECT_VERSION})
+	set(MACOSX_BUNDLE_COPYRIGHT "Copyright © 2022 Cemu Project")
+
 	set(MACOSX_BUNDLE_CATEGORY "public.app-category.games")
 
 	set_target_properties(CemuBin PROPERTIES
@@ -114,6 +118,15 @@ target_link_libraries(CemuBin PRIVATE
 	OpenGL::GL
 	SDL2::SDL2
 )
+
+if(UNIX AND NOT APPLE)
+	# due to nasm output some linkers will make stack executable
+	# cemu does not require this so we explicity disable it
+	target_link_options(CemuBin PRIVATE -z noexecstack)
+	# some residual debug info from boost/discord-rpc is normally included
+	# most likely not helpful in debugging problems with cemu code
+	target_link_options(CemuBin PRIVATE "$<$<CONFIG:Release>:-Xlinker;--strip-debug>")
+endif()
 
 if (ENABLE_WXWIDGETS)
 	target_link_libraries(CemuBin PRIVATE wx::base wx::core)

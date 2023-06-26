@@ -82,7 +82,7 @@ namespace erreula
 
 	struct ErrEula_t
 	{
-		coreinit::OSMutex mutex;
+		SysAllocator<coreinit::OSMutex> mutex;
 		uint32 regionType;
 		uint32 langType;
 		MEMPTR<coreinit::FSClient_t> fsClient;
@@ -171,21 +171,21 @@ namespace erreula
 	void export_IsDecideSelectButtonError(PPCInterpreter_t* hCPU)
 	{
 		if (g_errEula.buttonPressed)
-			forceLogDebug_printf("IsDecideSelectButtonError: TRUE");
+			cemuLog_logDebug(LogType::Force, "IsDecideSelectButtonError: TRUE");
 		osLib_returnFromFunction(hCPU, g_errEula.buttonPressed);
 	}
 
 	void export_IsDecideSelectLeftButtonError(PPCInterpreter_t* hCPU)
 	{
 		if (g_errEula.buttonPressed)
-			forceLogDebug_printf("IsDecideSelectLeftButtonError: TRUE");
+			cemuLog_logDebug(LogType::Force, "IsDecideSelectLeftButtonError: TRUE");
 		osLib_returnFromFunction(hCPU, g_errEula.buttonPressed);
 	}
 
 	void export_IsDecideSelectRightButtonError(PPCInterpreter_t* hCPU)
 	{
 		if (g_errEula.rightButtonPressed)
-			forceLogDebug_printf("IsDecideSelectRightButtonError: TRUE");
+			cemuLog_logDebug(LogType::Force, "IsDecideSelectRightButtonError: TRUE");
 		osLib_returnFromFunction(hCPU, g_errEula.rightButtonPressed);
 	}
 
@@ -205,7 +205,7 @@ namespace erreula
 		uint32 result = RESULTTYPE_NONE;
 		if (g_errEula.buttonPressed || g_errEula.rightButtonPressed)
 		{
-			forceLogDebug_printf("GetResultType: FINISH");
+			cemuLog_logDebug(LogType::Force, "GetResultType: FINISH");
 			result = RESULTTYPE_FINISH;
 		}
 
@@ -346,7 +346,6 @@ namespace erreula
 				std::string button2 = "No";
 				if (appearArg.button2Text)
 					button2 = boost::nowide::narrow(GetText(appearArg.button2Text.GetPtr()));
-					
 
 				float width1 = std::max(100.0f, ImGui::CalcTextSize(button1.c_str()).x + 10.0f);
 				float width2 = std::max(100.0f, ImGui::CalcTextSize(button2.c_str()).x + 10.0f);
@@ -359,10 +358,8 @@ namespace erreula
 				break;
 			}
 			}
-
-			ImGui::End();
 		}
-
+		ImGui::End();
 		ImGui::PopFont();
 
 		if(g_errEula.buttonPressed || g_errEula.rightButtonPressed)

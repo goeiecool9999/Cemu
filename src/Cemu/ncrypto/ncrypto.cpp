@@ -447,7 +447,7 @@ namespace NCrypto
 	{
 		if (size < sizeof(TMDFileHeaderWiiU))
 		{
-			cemuLog_force("TMD size {} below minimum size of {}", size, sizeof(TMDFileHeaderWiiU));
+			cemuLog_log(LogType::Force, "TMD size {} below minimum size of {}", size, sizeof(TMDFileHeaderWiiU));
 			return false;
 		}
 		TMDFileHeaderWiiU* header = (TMDFileHeaderWiiU*)data;
@@ -456,7 +456,7 @@ namespace NCrypto
 		size_t expectedSize = sizeof(TMDFileHeaderWiiU) + sizeof(TMDFileContentEntryWiiU) * header->numContent;
 		if (size < expectedSize)
 		{
-			cemuLog_force("TMD size {} below expected size of {}. Content count: {}", size, expectedSize, (uint16)header->numContent);
+			cemuLog_log(LogType::Force, "TMD size {} below expected size of {}. Content count: {}", size, expectedSize, (uint16)header->numContent);
 			return false;
 		}
 
@@ -550,7 +550,7 @@ namespace NCrypto
 		EC_POINT_mul(group, pubkey, bn_privKey, NULL, NULL, NULL);
 		BIGNUM* bn_x = BN_new();
 		BIGNUM* bn_y = BN_new();
-		EC_POINT_get_affine_coordinates_GF2m(group, pubkey, bn_x, bn_y, NULL);
+		EC_POINT_get_affine_coordinates(group, pubkey, bn_x, bn_y, NULL);
 
 		// store public key
 		ECCPubKey genPubKey;
@@ -806,7 +806,7 @@ namespace NCrypto
 			return "KOR";
 		else if (regionCode == CafeConsoleRegion::TWN)
 			return "TWN";
-		cemuLog_force("Unknown region code 0x{:x}", (uint32)regionCode);
+		cemuLog_log(LogType::Force, "Unknown region code 0x{:x}", (uint32)regionCode);
 		return "UKN";
 	}
 

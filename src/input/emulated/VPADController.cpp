@@ -221,7 +221,7 @@ void VPADController::update_touch(VPADStatus_t& status)
 
 		m_last_touch_position = glm::ivec2{ status.tpData.x, status.tpData.y };
 
-		/*cemuLog_force("TDATA: {},{} -> {},{} -> {},{} -> {},{} -> {},{} -> {},{}",
+		/*cemuLog_log(LogType::Force, "TDATA: {},{} -> {},{} -> {},{} -> {},{} -> {},{} -> {},{}",
 			left_mouse->x, left_mouse->y,
 			(left_mouse.value() - image_pos).x, (left_mouse.value() - image_pos).y,
 			relative_mouse_pos.x, relative_mouse_pos.y,
@@ -287,9 +287,9 @@ void VPADController::update_motion(VPADStatus_t& status)
 
 		int w, h;
 		if (pad_view)
-			gui_getPadWindowSize(&w, &h);
+			gui_getPadWindowPhysSize(w, h);
 		else
-			gui_getWindowSize(&w, &h);
+			gui_getWindowPhysSize(w, h);
 
 		float wx = mousePos.x / w;
 		float wy = mousePos.y / h;
@@ -408,7 +408,7 @@ bool VPADController::push_rumble(uint8* pattern, uint8 length)
 	std::scoped_lock lock(m_rumble_mutex);
 	if (m_rumble_queue.size() >= 5)
 	{
-		forceLogDebug_printf("too many cmds");
+		cemuLog_logDebug(LogType::Force, "too many cmds");
 		return false;
 	}
 

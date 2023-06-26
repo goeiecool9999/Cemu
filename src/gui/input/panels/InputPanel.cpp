@@ -92,7 +92,7 @@ void InputPanel::on_timer(const EmulatedControllerPtr& emulated_controller, cons
 			if (id >= kButtonAxisStart)
 			{
 				if (controller->get_axis_value(id) < 0.33f) {
-					forceLogDebug_printf("skipping since value too low %f", controller->get_axis_value(id));
+					cemuLog_logDebug(LogType::Force, "skipping since value too low {}", controller->get_axis_value(id));
 					s_was_idle = true;
 					return;
 				}
@@ -212,6 +212,10 @@ void InputPanel::bind_hotkey_events(wxTextCtrl* text_ctrl)
 	text_ctrl->Bind(wxEVT_SET_FOCUS, &InputPanel::on_edit_key_focus, this);
 	text_ctrl->Bind(wxEVT_KILL_FOCUS, &InputPanel::on_edit_key_kill_focus, this);
 	text_ctrl->Bind(wxEVT_RIGHT_DOWN, &InputPanel::on_right_click, this);
+#if BOOST_OS_LINUX
+	// Bind to a no-op lambda to disable arrow keys navigation
+	text_ctrl->Bind(wxEVT_KEY_DOWN, [](wxKeyEvent &) {});
+#endif
 }
 
 void InputPanel::on_left_click(wxMouseEvent& event)
