@@ -121,6 +121,8 @@ CurlRequestHelper::~CurlRequestHelper()
 
 void CurlRequestHelper::initate(std::string url, SERVER_SSL_CONTEXT sslContext)
 {
+	cemuLog_log(LogType::Force, "perfoming account HTTP request at url: {}", url);
+
 	// reset parameters
 	m_headerExtraFields.clear();
 	m_postData.clear();
@@ -211,6 +213,9 @@ bool CurlRequestHelper::submitRequest(bool isPost)
 	for (auto& itr : m_headerExtraFields)
 		headers = curl_slist_append(headers, itr.data.c_str());
 	curl_easy_setopt(m_curl, CURLOPT_HTTPHEADER, headers);
+
+	for (auto& itr : m_headerExtraFields)
+		cemuLog_log(LogType::Force, fmt::format("Header: {}", itr.data));
 
 	// post
 	if (isPost)
