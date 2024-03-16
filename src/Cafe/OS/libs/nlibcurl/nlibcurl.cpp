@@ -225,7 +225,7 @@ void CurlWorkerThread(CURL_t* curl, PPCConcurrentQueue<QueueMsg_t>* callerQueue,
 
 uint32 SendOrderToWorker(CURL_t* curl, QueueOrder order, uint32 arg1 = 0)
 {
-	OSThread_t* currentThread = coreinitThread_getCurrentThreadDepr(ppcInterpreterCurrentInstance);
+	OSThread_t* currentThread = coreinit::OSGetCurrentThread();
 	curl->curlThread = currentThread;
 
 	// cemuLog_logDebug(LogType::Force, "CURRENTTHREAD: 0x{} -> {}",currentThread, order)
@@ -504,7 +504,7 @@ void export_curl_multi_fdset(PPCInterpreter_t* hCPU)
 	// fd write set
 	for (uint32 i = 0; i < h_writeFd.fd_count; i++)
 	{
-		cemu_assert_debug(false);
+		hostFdSet(h_writeFd.fd_array[i], writeFd.GetPtr());
 	}
 	// fd exception set
 	for (uint32 i = 0; i < h_exceptionFd.fd_count; i++)
@@ -707,7 +707,7 @@ void export_curl_easy_init(PPCInterpreter_t* hCPU)
 		memset(result.GetPtr(), 0, sizeof(CURL_t));
 		*result = {};
 		result->curl = curl_easy_init();
-		result->curlThread = coreinitThread_getCurrentThreadDepr(ppcInterpreterCurrentInstance);
+		result->curlThread = coreinit::OSGetCurrentThread();
 
 		result->info_contentType = nullptr;
 		result->info_redirectUrl = nullptr;
@@ -906,7 +906,8 @@ int sockopt_callback(void* clientp, curl_socket_t curlfd, curlsocktype purpose)
 }
 
 size_t read_callback(char* buffer, size_t size, size_t nitems, void* instream)
-{
+{	
+	nitems = std::min<uint32>(nitems, 0x4000);
 	CURL_t* curl = (CURL_t*)instream;
 
 	cemuLog_logDebug(LogType::Force, "read_callback(0x{}, 0x{:x}, 0x{:x}, 0x{:08x}) [func: 0x{:x}]", (void*)buffer, size, nitems, curl->in_set.GetMPTR(), curl->fread_func_set.GetMPTR());

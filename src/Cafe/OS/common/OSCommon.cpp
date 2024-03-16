@@ -10,6 +10,7 @@
 #include "Cafe/OS/libs/nn_uds/nn_uds.h"
 #include "Cafe/OS/libs/nn_nim/nn_nim.h"
 #include "Cafe/OS/libs/nn_ndm/nn_ndm.h"
+#include "Cafe/OS/libs/nn_spm/nn_spm.h"
 #include "Cafe/OS/libs/nn_ec/nn_ec.h"
 #include "Cafe/OS/libs/nn_boss/nn_boss.h"
 #include "Cafe/OS/libs/nn_fp/nn_fp.h"
@@ -84,6 +85,7 @@ void osLib_addFunctionInternal(const char* libraryName, const char* functionName
 	uint32 funcHashA, funcHashB;
 	osLib_generateHashFromName(libraryName, &libHashA, &libHashB);
 	osLib_generateHashFromName(functionName, &funcHashA, &funcHashB);
+	std::string hleName = fmt::format("{}.{}", libraryName, functionName);
 	// if entry already exists, update it
 	for (auto& it : *s_osFunctionTable)
 	{
@@ -92,11 +94,11 @@ void osLib_addFunctionInternal(const char* libraryName, const char* functionName
 			it.funcHashA == funcHashA &&
 			it.funcHashB == funcHashB)
 		{
-			it.hleFunc = PPCInterpreter_registerHLECall(osFunction);
+			it.hleFunc = PPCInterpreter_registerHLECall(osFunction, hleName);
 			return;
 		}
 	}
-	s_osFunctionTable->emplace_back(libHashA, libHashB, funcHashA, funcHashB, fmt::format("{}.{}", libraryName, functionName), PPCInterpreter_registerHLECall(osFunction));
+	s_osFunctionTable->emplace_back(libHashA, libHashB, funcHashA, funcHashB, hleName, PPCInterpreter_registerHLECall(osFunction, hleName));
 }
 
 extern "C" DLLEXPORT void osLib_registerHLEFunction(const char* libraryName, const char* functionName, void(*osFunction)(PPCInterpreter_t * hCPU))
@@ -204,6 +206,7 @@ void osLib_load()
 	nnUds_load();
 	nn::nim::load();
 	nn::ndm::load();
+	nn::spm::load();
 	nn::save::load();
 	nsysnet_load();
 	nn::fp::load();

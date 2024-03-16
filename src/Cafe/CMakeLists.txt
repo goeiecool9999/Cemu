@@ -40,6 +40,7 @@ add_library(CemuCafe
   HW/Espresso/Debugger/DebugSymbolStorage.h
   HW/Espresso/Debugger/GDBStub.h
   HW/Espresso/Debugger/GDBStub.cpp
+  HW/Espresso/Debugger/GDBBreakpoints.cpp
   HW/Espresso/Debugger/GDBBreakpoints.h
   HW/Espresso/EspressoISA.h
   HW/Espresso/Interpreter/PPCInterpreterALU.hpp
@@ -240,6 +241,8 @@ add_library(CemuCafe
   IOSU/nn/iosu_nn_service.h
   IOSU/PDM/iosu_pdm.cpp
   IOSU/PDM/iosu_pdm.h
+  IOSU/ODM/iosu_odm.cpp
+  IOSU/ODM/iosu_odm.h
   OS/common/OSCommon.cpp
   OS/common/OSCommon.h
   OS/common/OSUtil.h
@@ -399,6 +402,8 @@ add_library(CemuCafe
   OS/libs/nn_idbe/nn_idbe.h
   OS/libs/nn_ndm/nn_ndm.cpp
   OS/libs/nn_ndm/nn_ndm.h
+  OS/libs/nn_spm/nn_spm.cpp
+  OS/libs/nn_spm/nn_spm.h
   OS/libs/nn_nfp/AmiiboCrypto.h
   OS/libs/nn_nfp/nn_nfp.cpp
   OS/libs/nn_nfp/nn_nfp.h
@@ -416,6 +421,10 @@ add_library(CemuCafe
   OS/libs/nn_olv/nn_olv_UploadCommunityTypes.h
   OS/libs/nn_olv/nn_olv_UploadFavoriteTypes.cpp
   OS/libs/nn_olv/nn_olv_UploadFavoriteTypes.h
+  OS/libs/nn_olv/nn_olv_PostTypes.cpp
+  OS/libs/nn_olv/nn_olv_PostTypes.h
+  OS/libs/nn_olv/nn_olv_OfflineDB.cpp
+  OS/libs/nn_olv/nn_olv_OfflineDB.h
   OS/libs/nn_pdm/nn_pdm.cpp
   OS/libs/nn_pdm/nn_pdm.h
   OS/libs/nn_save/nn_save.cpp
@@ -426,6 +435,14 @@ add_library(CemuCafe
   OS/libs/nn_uds/nn_uds.h
   OS/libs/nsyshid/nsyshid.cpp
   OS/libs/nsyshid/nsyshid.h
+  OS/libs/nsyshid/Backend.h
+  OS/libs/nsyshid/AttachDefaultBackends.cpp
+  OS/libs/nsyshid/Whitelist.cpp
+  OS/libs/nsyshid/Whitelist.h
+  OS/libs/nsyshid/BackendLibusb.cpp
+  OS/libs/nsyshid/BackendLibusb.h
+  OS/libs/nsyshid/BackendWindowsHID.cpp
+  OS/libs/nsyshid/BackendWindowsHID.h
   OS/libs/nsyskbd/nsyskbd.cpp
   OS/libs/nsyskbd/nsyskbd.h
   OS/libs/nsysnet/nsysnet.cpp
@@ -464,8 +481,6 @@ add_library(CemuCafe
   OS/RPL/rpl_structs.h
   OS/RPL/rpl_symbol_storage.cpp
   OS/RPL/rpl_symbol_storage.h
-  TitleList/BaseInfo.cpp
-  TitleList/BaseInfo.h
   TitleList/GameInfo.h
   TitleList/ParsedMetaXml.h
   TitleList/SaveInfo.cpp
@@ -517,6 +532,17 @@ if (ENABLE_WAYLAND)
 	# PUBLIC because wayland-client.h is included in VulkanAPI.h
   target_link_libraries(CemuCafe PUBLIC Wayland::Client)
 endif()
+
+if (ENABLE_NSYSHID_LIBUSB)
+	if (ENABLE_VCPKG)
+		find_package(PkgConfig REQUIRED)
+		pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0)
+		target_link_libraries(CemuCafe PRIVATE PkgConfig::libusb)
+	else ()
+		find_package(libusb MODULE REQUIRED)
+		target_link_libraries(CemuCafe PRIVATE libusb::libusb)
+	endif ()
+endif ()
 
 if (ENABLE_WXWIDGETS)
 	target_link_libraries(CemuCafe PRIVATE wx::base wx::core)

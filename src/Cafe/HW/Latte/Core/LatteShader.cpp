@@ -144,7 +144,7 @@ LatteShaderPSInputTable* LatteSHRC_GetPSInputTable()
 	return &_activePSImportTable;
 }
 
-bool LatteSHRC_RemoveFromCache(LatteDecompilerShader* shader)
+void LatteSHRC_RemoveFromCache(LatteDecompilerShader* shader)
 {
 	bool removed = false;
 	auto& cache = LatteSHRC_GetCacheByType(shader->shaderType);
@@ -156,10 +156,14 @@ bool LatteSHRC_RemoveFromCache(LatteDecompilerShader* shader)
 	}
 	else if (baseIt->second == shader)
 	{
-		if (baseIt->second->next)
-			cache.emplace(shader->baseHash, baseIt->second->next);
-		else
-			cache.erase(baseIt);
+        cemu_assert_debug(baseIt->second == shader);
+        cache.erase(baseIt);
+		if (shader->next)
+        {
+            cemu_assert_debug(shader->baseHash == shader->next->baseHash);
+            cache.emplace(shader->baseHash, shader->next);
+        }
+        shader->next = 0;
 		removed = true;
 	}
 	else
@@ -176,7 +180,7 @@ bool LatteSHRC_RemoveFromCache(LatteDecompilerShader* shader)
 			}
 		}
 	}
-	return removed;
+	cemu_assert(removed);
 }
 
 void LatteSHRC_RemoveFromCacheByHash(uint64 shader_base_hash, uint64 shader_aux_hash, LatteConst::ShaderType type)
@@ -648,7 +652,7 @@ LatteDecompilerShader* LatteShader_CreateShaderFromDecompilerOutput(LatteDecompi
 	}
 	else
 	{
-		shader->uniform.count_uniformRegister = decompilerOutput.uniformOffsetsVK.count_uniformRegister;
+		shader->uniform.count_uniformRegister = decompilerOutput.uniformOffsetsGL.count_uniformRegister;
 	}
 	// calculate aux hash
 	if (calculateAuxHash)
@@ -834,7 +838,6 @@ LatteDecompilerShader* LatteShader_CompileSeparablePixelShader(uint64 baseHash, 
 void LatteSHRC_UpdateVertexShader(uint8* vertexShaderPtr, uint32 vertexShaderSize, bool usesGeometryShader)
 {
 	// todo - should include VTX_SEMANTIC table in state
-
 	LatteSHRC_UpdateVSBaseHash(vertexShaderPtr, vertexShaderSize, usesGeometryShader);
 	uint64 vsAuxHash = 0;
 	auto itBaseShader = sVertexShaders.find(_shaderBaseHash_vs);
@@ -851,15 +854,13 @@ void LatteSHRC_UpdateVertexShader(uint8* vertexShaderPtr, uint32 vertexShaderSiz
 		LatteGPUState.activeShaderHasError = true;
 		return;
 	}
-	g_renderer->shader_bind(vertexShader->shader);
 	_activeVertexShader = vertexShader;
 }
 
 void LatteSHRC_UpdateGeometryShader(bool usesGeometryShader, uint8* geometryShaderPtr, uint32 geometryShaderSize, uint8* geometryCopyShader, uint32 geometryCopyShaderSize)
 {
-	if (usesGeometryShader == false || _activeVertexShader == nullptr)
+	if (!usesGeometryShader || !_activeVertexShader)
 	{
-		g_renderer->shader_unbind(RendererShader::ShaderType::kGeometry);
 		_shaderBaseHash_gs = 0;
 		_activeGeometryShader = nullptr;
 		return;
@@ -883,21 +884,11 @@ void LatteSHRC_UpdateGeometryShader(bool usesGeometryShader, uint8* geometryShad
 		LatteGPUState.activeShaderHasError = true;
 		return;
 	}
-	g_renderer->shader_bind(geometryShader->shader);
 	_activeGeometryShader = geometryShader;
 }
 
 void LatteSHRC_UpdatePixelShader(uint8* pixelShaderPtr, uint32 pixelShaderSize, bool usesGeometryShader)
 {
-	if (LatteGPUState.contextRegister[mmVGT_STRMOUT_EN] != 0 && g_renderer->GetType() == RendererAPI::OpenGL)
-	{
-		if (_activePixelShader)
-		{
-			g_renderer->shader_unbind(RendererShader::ShaderType::kFragment);
-			_activePixelShader = nullptr;
-		}
-		return;
-	}
 	LatteSHRC_UpdatePSBaseHash(pixelShaderPtr, pixelShaderSize, usesGeometryShader);
 	uint64 psAuxHash = 0;
 	auto itBaseShader = sPixelShaders.find(_shaderBaseHash_ps);
@@ -914,7 +905,6 @@ void LatteSHRC_UpdatePixelShader(uint8* pixelShaderPtr, uint32 pixelShaderSize, 
 		LatteGPUState.activeShaderHasError = true;
 		return;
 	}
-	g_renderer->shader_bind(pixelShader->shader);
 	_activePixelShader = pixelShader;
 }
 
@@ -1008,4 +998,17 @@ void LatteSHRC_Init()
 	cemu_assert_debug(sVertexShaders.empty());
 	cemu_assert_debug(sGeometryShaders.empty());
 	cemu_assert_debug(sPixelShaders.empty());
+}
+
+void LatteSHRC_UnloadAll()
+{
+    while(!sVertexShaders.empty())
+        LatteShader_free(sVertexShaders.begin()->second);
+    cemu_assert_debug(sVertexShaders.empty());
+    while(!sGeometryShaders.empty())
+        LatteShader_free(sGeometryShaders.begin()->second);
+    cemu_assert_debug(sGeometryShaders.empty());
+    while(!sPixelShaders.empty())
+        LatteShader_free(sPixelShaders.begin()->second);
+    cemu_assert_debug(sPixelShaders.empty());
 }

@@ -13,6 +13,12 @@
 #include <wx/textdlg.h>
 #include <wx/stattext.h>
 #include <wx/sizer.h>
+#include <wx/wfstream.h>
+#include <wx/imagpng.h>
+#include <wx/string.h>
+#include <wx/utils.h>
+#include <wx/clipbrd.h>
+
 
 #include <boost/algorithm/string.hpp>
 #include <boost/tokenizer.hpp>
@@ -29,6 +35,17 @@
 #include "../wxHelper.h"
 
 #include "Cafe/IOSU/PDM/iosu_pdm.h" // for last played and play time
+
+#if BOOST_OS_WINDOWS
+// for shortcut creation
+#include <windows.h>
+#include <winnls.h>
+#include <shobjidl.h>
+#include <objbase.h>
+#include <objidl.h>
+#include <shlguid.h>
+#include <shlobj.h>
+#endif
 
 // public events
 wxDEFINE_EVENT(wxEVT_OPEN_SETTINGS, wxCommandEvent);
@@ -79,6 +96,7 @@ wxGameList::wxGameList(wxWindow* parent, wxWindowID id)
 	InsertColumn(ColumnGameTime, _("You've played"), wxLIST_FORMAT_LEFT, config.column_width.game_time);
 	InsertColumn(ColumnGameStarted, _("Last played"), wxLIST_FORMAT_LEFT, config.column_width.game_started);
 	InsertColumn(ColumnRegion, _("Region"), wxLIST_FORMAT_LEFT, config.column_width.region);
+    InsertColumn(ColumnTitleID, _("Title ID"), wxLIST_FORMAT_LEFT, config.column_width.title_id);
 
 	const char transparent_bitmap[kIconWidth * kIconWidth * 4] = {0};
 	wxBitmap blank(transparent_bitmap, kIconWidth, kIconWidth);
@@ -244,6 +262,8 @@ int wxGameList::GetColumnDefaultWidth(int column)
 		return DefaultColumnSize::game_started;
 	case ColumnRegion:
 		return DefaultColumnSize::region;
+    case ColumnTitleID:
+        return DefaultColumnSize::title_id;
 	default:
 		return 80;
 	}
@@ -305,7 +325,7 @@ std::string wxGameList::GetNameByTitleId(uint64 titleId)
 		return "Unknown title";
 	std::string name;
 	if (!GetConfig().GetGameListCustomName(titleId, name))
-		name = titleInfo.GetTitleName();
+		name = titleInfo.GetMetaTitleName();
 	m_name_cache.emplace(titleId, name);
 	return name;
 }
@@ -528,6 +548,12 @@ enum ContextMenuEntries
 	kContextMenuStyleList,
 	kContextMenuStyleIcon,
 	kContextMenuStyleIconSmall,
+
+    kContextMenuCreateShortcut,
+
+    kContextMenuCopyTitleName,
+    kContextMenuCopyTitleId,
+    kContextMenuCopyTitleImage
 };
 void wxGameList::OnContextMenu(wxContextMenuEvent& event)
 {
@@ -568,6 +594,14 @@ void wxGameList::OnContextMenu(wxContextMenuEvent& event)
 			menu.Append(kContextMenuEditGraphicPacks, _("&Edit graphic packs"));
 			menu.Append(kContextMenuEditGameProfile, _("&Edit game profile"));
 
+            menu.AppendSeparator();
+#if BOOST_OS_LINUX || BOOST_OS_WINDOWS
+            menu.Append(kContextMenuCreateShortcut, _("&Create shortcut"));
+#endif
+            menu.AppendSeparator();
+            menu.Append(kContextMenuCopyTitleName, _("&Copy Title Name"));
+            menu.Append(kContextMenuCopyTitleId, _("&Copy Title ID"));
+            menu.Append(kContextMenuCopyTitleImage, _("&Copy Title Image"));
 			menu.AppendSeparator();
 		}
 	}
@@ -610,7 +644,7 @@ void wxGameList::OnContextMenuSelected(wxCommandEvent& event)
 				if(dialog.ShowModal() == wxID_OK)
 				{
 					const auto custom_name = dialog.GetValue();
-					GetConfig().SetGameListCustomName(title_id, wxHelper::MakeUTF8(custom_name));
+					GetConfig().SetGameListCustomName(title_id, custom_name.utf8_string());
 					m_name_cache.clear();
 					g_config.Save();
 					// update list entry
@@ -687,6 +721,45 @@ void wxGameList::OnContextMenuSelected(wxCommandEvent& event)
 				(new GameProfileWindow(GetParent(), title_id))->Show();
 				break;
 			}
+            case kContextMenuCreateShortcut:
+            {
+#if BOOST_OS_LINUX || BOOST_OS_WINDOWS
+                CreateShortcut(gameInfo);
+#endif
+                break;
+            }
+            case kContextMenuCopyTitleName:
+            {
+                if (wxTheClipboard->Open())
+                {
+                    wxTheClipboard->SetData(new wxTextDataObject(gameInfo.GetTitleName()));
+                    wxTheClipboard->Close();
+                }
+                break;
+            }
+            case kContextMenuCopyTitleId:
+            {
+                if (wxTheClipboard->Open())
+                {
+                    wxTheClipboard->SetData(new wxTextDataObject(fmt::format("{:016x}", gameInfo.GetBaseTitleId())));
+                    wxTheClipboard->Close();
+                }
+                break;
+            }
+            case kContextMenuCopyTitleImage:
+            {
+                if (wxTheClipboard->Open())
+                {
+                    int icon_large;
+                    int icon_small;
+                    if (!QueryIconForTitle(title_id, icon_large, icon_small))
+                        break;
+                    auto icon = m_image_list->GetBitmap(icon_large);
+                    wxTheClipboard->SetData(new wxBitmapDataObject(icon));
+                    wxTheClipboard->Close();
+                }
+                break;
+            }
 			}
 		}
 	}
@@ -729,6 +802,7 @@ void wxGameList::OnColumnRightClick(wxListEvent& event)
 		ShowGameTime,
 		ShowLastPlayed,
 		ShowRegion,
+        ShowTitleId
 	};
 	const int column = event.GetColumn();
 	wxMenu menu;
@@ -744,6 +818,7 @@ void wxGameList::OnColumnRightClick(wxListEvent& event)
 	menu.AppendCheckItem(ShowGameTime, _("Show &game time"))->Check(GetColumnWidth(ColumnGameTime) > 0);
 	menu.AppendCheckItem(ShowLastPlayed, _("Show &last played"))->Check(GetColumnWidth(ColumnGameStarted) > 0);
 	menu.AppendCheckItem(ShowRegion, _("Show &region"))->Check(GetColumnWidth(ColumnRegion) > 0);
+    menu.AppendCheckItem(ShowTitleId, _("Show &title ID"))->Check(GetColumnWidth(ColumnTitleID) > 0);
 
 	menu.Bind(wxEVT_COMMAND_MENU_SELECTED,
 		[this](wxCommandEvent& event) {
@@ -773,6 +848,9 @@ void wxGameList::OnColumnRightClick(wxListEvent& event)
 			case ShowRegion:
 				config.column_width.region = menu->IsChecked(ShowRegion) ? DefaultColumnSize::region : 0;
 				break;
+            case ShowTitleId:
+                config.column_width.title_id = menu->IsChecked(ShowTitleId) ? DefaultColumnSize::title_id : 0;
+                break;
 			case ResetWidth:
 			{
 				switch (column)
@@ -797,6 +875,8 @@ void wxGameList::OnColumnRightClick(wxListEvent& event)
 				case ColumnRegion:
 					config.column_width.region = DefaultColumnSize::region;
 					break;
+                case ColumnTitleID:
+                    config.column_width.title_id = DefaultColumnSize::title_id;
 				default:
 					return;
 				}
@@ -836,6 +916,7 @@ void wxGameList::ApplyGameListColumnWidths()
 	SetColumnWidth(ColumnGameTime, config.column_width.game_time);
 	SetColumnWidth(ColumnGameStarted, config.column_width.game_started);
 	SetColumnWidth(ColumnRegion, config.column_width.region);
+    SetColumnWidth(ColumnTitleID, config.column_width.title_id);
 
 	AdjustLastColumnWidth();
 }
@@ -931,13 +1012,11 @@ int wxGameList::FindInsertPosition(TitleId titleId)
 void wxGameList::OnGameEntryUpdatedByTitleId(wxTitleIdEvent& event)
 {
 	const auto titleId = event.GetTitleId();
-	// get GameInfo from title list
 	GameInfo2 gameInfo = CafeTitleList::GetGameInfo(titleId);
-
-	if (!gameInfo.IsValid())
+	if (!gameInfo.IsValid() || gameInfo.IsSystemDataTitle())
 	{
-		// entry no longer exists
-		// we dont need to do anything here because all delete operations should trigger a full list refresh
+		// entry no longer exists or is not a valid game
+		// we dont need to remove list entries here because all delete operations should trigger a full list refresh
 		return;
 	}
 	TitleId baseTitleId = gameInfo.GetBaseTitleId();
@@ -975,20 +1054,25 @@ void wxGameList::OnGameEntryUpdatedByTitleId(wxTitleIdEvent& event)
 			if (iosu::pdm::GetStatForGamelist(baseTitleId, playTimeStat))
 			{
 				// time played
-				uint32 timePlayed = playTimeStat.numMinutesPlayed * 60;
-				if (timePlayed == 0)
+				uint32 minutesPlayed = playTimeStat.numMinutesPlayed;
+				if (minutesPlayed == 0)
 					SetItem(index, ColumnGameTime, wxEmptyString);
-				else if (timePlayed < 60)
-					SetItem(index, ColumnGameTime, fmt::format("{} seconds", timePlayed));
-				else if (timePlayed < 60 * 60)
-					SetItem(index, ColumnGameTime, fmt::format("{} minutes", timePlayed / 60));
+				else if (minutesPlayed < 60)
+					SetItem(index, ColumnGameTime, formatWxString(wxPLURAL("{} minute", "{} minutes", minutesPlayed), minutesPlayed));
 				else
-					SetItem(index, ColumnGameTime, fmt::format("{} hours {} minutes", timePlayed / 3600, (timePlayed / 60) % 60));
+				{
+					uint32 hours = minutesPlayed / 60;
+					uint32 minutes = minutesPlayed % 60;
+					wxString hoursText = formatWxString(wxPLURAL("{} hour", "{} hours", hours), hours);
+					wxString minutesText = formatWxString(wxPLURAL("{} minute", "{} minutes", minutes), minutes);
+					SetItem(index, ColumnGameTime, hoursText + " " + minutesText);
+				}
+				
 				// last played
 				if (playTimeStat.last_played.year != 0)
 				{
 					const wxDateTime tmp((wxDateTime::wxDateTime_t)playTimeStat.last_played.day, (wxDateTime::Month)playTimeStat.last_played.month, (wxDateTime::wxDateTime_t)playTimeStat.last_played.year, 0, 0, 0, 0);
-					SetItem(index, ColumnGameStarted, tmp.FormatISODate());
+					SetItem(index, ColumnGameStarted, tmp.FormatDate());
 				}
 				else
 					SetItem(index, ColumnGameStarted, _("never"));
@@ -1002,7 +1086,8 @@ void wxGameList::OnGameEntryUpdatedByTitleId(wxTitleIdEvent& event)
 
 
 		const auto region_text = fmt::format("{}", gameInfo.GetRegion());
-		SetItem(index, ColumnRegion, _(region_text));
+		SetItem(index, ColumnRegion, wxGetTranslation(region_text));
+        SetItem(index, ColumnTitleID, fmt::format("{:016x}", baseTitleId));
 	}
 	else if (m_style == Style::kIcons)
 	{
@@ -1089,7 +1174,7 @@ void wxGameList::HandleTitleListCallback(CafeTitleListCallbackEvent* evt)
 
 void wxGameList::RemoveCache(const std::list<fs::path>& cachePaths, const std::string& titleName)
 {
-	wxMessageDialog dialog(this, fmt::format(fmt::runtime(_("Remove the shader caches for {}?").ToStdString()), titleName), _("Remove shader caches"), wxCENTRE | wxYES_NO | wxICON_EXCLAMATION);
+	wxMessageDialog dialog(this, formatWxString(_("Remove the shader caches for {}?"), titleName), _("Remove shader caches"), wxCENTRE | wxYES_NO | wxICON_EXCLAMATION);
 	dialog.SetYesNoLabels(_("Yes"), _("No"));
 
 	const auto dialogResult = dialog.ShowModal();
@@ -1104,11 +1189,12 @@ void wxGameList::RemoveCache(const std::list<fs::path>& cachePaths, const std::s
 	if (errs.empty())
 		wxMessageDialog(this, _("The shader caches were removed!"), _("Shader caches removed"), wxCENTRE | wxOK | wxICON_INFORMATION).ShowModal();
 	else
-		wxMessageDialog(this, fmt::format(fmt::runtime(_("Failed to remove the shader caches:\n{}").ToStdString()), fmt::join(errs, "\n")), _("Error"), wxCENTRE | wxOK | wxICON_ERROR).ShowModal();
+		wxMessageDialog(this, formatWxString(_("Failed to remove the shader caches:\n{}"), fmt::join(errs, "\n")), _("Error"), wxCENTRE | wxOK | wxICON_ERROR).ShowModal();
 }
 
 void wxGameList::AsyncWorkerThread()
 {
+	SetThreadName("GameListWorker");
 	while (m_async_worker_active)
 	{
 		m_async_task_count.decrementWithWait();
@@ -1189,3 +1275,130 @@ void wxGameList::DeleteCachedStrings()
 {
 	m_name_cache.clear();
 }
+
+#if BOOST_OS_LINUX || BOOST_OS_WINDOWS
+void wxGameList::CreateShortcut(GameInfo2& gameInfo) {
+    const auto title_id = gameInfo.GetBaseTitleId();
+    const auto title_name = gameInfo.GetTitleName();
+    auto exe_path = ActiveSettings::GetExecutablePath();
+    const char *flatpak_id = getenv("FLATPAK_ID");
+
+    // GetExecutablePath returns the AppImage's temporary mount location, instead of its actual path
+    wxString appimage_path;
+    if (wxGetEnv(("APPIMAGE"), &appimage_path)) {
+        exe_path = appimage_path.utf8_string();
+    }
+
+#if BOOST_OS_LINUX
+    const wxString desktop_entry_name = wxString::Format("%s.desktop", title_name);
+    wxFileDialog entry_dialog(this, _("Choose desktop entry location"), "~/.local/share/applications", desktop_entry_name,
+                              "Desktop file (*.desktop)|*.desktop", wxFD_SAVE | wxFD_CHANGE_DIR | wxFD_OVERWRITE_PROMPT);
+#elif BOOST_OS_WINDOWS
+    // Get '%APPDATA%\Microsoft\Windows\Start Menu\Programs' path
+    PWSTR user_shortcut_folder;
+    SHGetKnownFolderPath(FOLDERID_Programs, 0, NULL, &user_shortcut_folder);
+    const wxString shortcut_name = wxString::Format("%s.lnk", title_name);
+    wxFileDialog entry_dialog(this, _("Choose shortcut location"), _pathToUtf8(user_shortcut_folder), shortcut_name,
+                              "Shortcut (*.lnk)|*.lnk", wxFD_SAVE | wxFD_CHANGE_DIR | wxFD_OVERWRITE_PROMPT);
+#endif
+    const auto result = entry_dialog.ShowModal();
+    if (result == wxID_CANCEL)
+        return;
+    const auto output_path = entry_dialog.GetPath();
+
+#if BOOST_OS_LINUX
+    std::optional<fs::path> icon_path;
+    // Obtain and convert icon
+    {
+        m_icon_cache_mtx.lock();
+        const auto icon_iter = m_icon_cache.find(title_id);
+        const auto result_index = (icon_iter != m_icon_cache.cend()) ? std::optional<int>(icon_iter->second.first) : std::nullopt;
+        m_icon_cache_mtx.unlock();
+
+        // In most cases it should find it
+        if (!result_index){
+            wxMessageBox(_("Icon is yet to load, so will not be used by the shortcut"), _("Warning"), wxOK | wxCENTRE | wxICON_WARNING);
+        }
+        else {
+            const fs::path out_icon_dir = ActiveSettings::GetUserDataPath("icons");
+
+            if (!fs::exists(out_icon_dir) && !fs::create_directories(out_icon_dir)){
+                wxMessageBox(_("Cannot access the icon directory, the shortcut will have no icon"), _("Warning"), wxOK | wxCENTRE | wxICON_WARNING);
+            }
+            else {
+                icon_path = out_icon_dir / fmt::format("{:016x}.png", gameInfo.GetBaseTitleId());
+
+                auto image = m_image_list->GetIcon(result_index.value()).ConvertToImage();
+
+                wxFileOutputStream png_file(_pathToUtf8(icon_path.value()));
+                wxPNGHandler pngHandler;
+                if (!pngHandler.SaveFile(&image, png_file, false)) {
+                    icon_path = std::nullopt;
+                    wxMessageBox(_("The icon was unable to be saved, the shortcut will have no icon"), _("Warning"), wxOK | wxCENTRE | wxICON_WARNING);
+                }
+            }
+        }
+    }
+
+    std::string desktop_exec_entry;
+    if (flatpak_id)
+        desktop_exec_entry = fmt::format("/usr/bin/flatpak run {0} --title-id {1:016x}", flatpak_id, title_id);
+    else
+        desktop_exec_entry = fmt::format("{0:?} --title-id {1:016x}", _pathToUtf8(exe_path), title_id);
+
+    // 'Icon' accepts spaces in file name, does not accept quoted file paths
+    // 'Exec' does not accept non-escaped spaces, and can accept quoted file paths
+    auto desktop_entry_string =
+            fmt::format("[Desktop Entry]\n"
+                        "Name={0}\n"
+                        "Comment=Play {0} on Cemu\n"
+                        "Exec={1}\n"
+                        "Icon={2}\n"
+                        "Terminal=false\n"
+                        "Type=Application\n"
+                        "Categories=Game;\n",
+                        title_name,
+                        desktop_exec_entry,
+                        _pathToUtf8(icon_path.value_or("")));
+
+    if (flatpak_id)
+        desktop_entry_string += fmt::format("X-Flatpak={}\n", flatpak_id);
+
+    std::ofstream output_stream(output_path);
+    if (!output_stream.good())
+    {
+        auto errorMsg = formatWxString(_("Failed to save desktop entry to {}"), output_path.utf8_string());
+        wxMessageBox(errorMsg, _("Error"), wxOK | wxCENTRE | wxICON_ERROR);
+        return;
+    }
+    output_stream << desktop_entry_string;
+
+#elif BOOST_OS_WINDOWS
+    IShellLinkW *shell_link;
+    HRESULT hres = CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLink, reinterpret_cast<LPVOID*>(&shell_link));
+    if (SUCCEEDED(hres))
+    {
+        const auto description = wxString::Format("Play %s on Cemu", title_name);
+        const auto args = wxString::Format("-t %016llx", title_id);
+
+        shell_link->SetPath(exe_path.wstring().c_str());
+        shell_link->SetDescription(description.wc_str());
+        shell_link->SetArguments(args.wc_str());
+        shell_link->SetWorkingDirectory(exe_path.parent_path().wstring().c_str());
+        // Use icon from Cemu exe for now since we can't embed icons into the shortcut
+        // in the future we could convert and store icons in AppData or ProgramData
+        shell_link->SetIconLocation(exe_path.wstring().c_str(), 0);
+
+        IPersistFile *shell_link_file;
+        // save the shortcut
+        hres = shell_link->QueryInterface(IID_IPersistFile, reinterpret_cast<LPVOID*>(&shell_link_file));
+        if (SUCCEEDED(hres))
+        {
+            hres = shell_link_file->Save(output_path.wc_str(), TRUE);
+            shell_link_file->Release();
+        }
+        shell_link->Release();
+    }
+#endif
+}
+#endif

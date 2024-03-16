@@ -9,7 +9,7 @@ bool sTLInitialized{ false };
 fs::path sTLCacheFilePath;
 
 // lists for tracking known titles
-// note: The list may only contain titles with valid meta data. Entries loaded from the cache may not have been parsed yet, but they will use a cached value for titleId and titleVersion
+// note: The list may only contain titles with valid meta data (except for certain system titles). Entries loaded from the cache may not have been parsed yet, but they will use a cached value for titleId and titleVersion
 std::mutex sTLMutex;
 std::vector<TitleInfo*> sTLList;
 std::vector<TitleInfo*> sTLListPending;
@@ -65,6 +65,7 @@ void CafeTitleList::LoadCacheFile()
 		if( !TitleIdParser::ParseFromStr(titleInfoNode.attribute("titleId").as_string(), titleId))
 			continue;
 		uint16 titleVersion = titleInfoNode.attribute("version").as_uint();
+		uint32 sdkVersion = titleInfoNode.attribute("sdk_version").as_uint();
 		TitleInfo::TitleDataFormat format = (TitleInfo::TitleDataFormat)ConvertString<uint32>(titleInfoNode.child_value("format"));
 		CafeConsoleRegion region = (CafeConsoleRegion)ConvertString<uint32>(titleInfoNode.child_value("region"));
 		std::string name = titleInfoNode.child_value("name");
@@ -76,6 +77,7 @@ void CafeTitleList::LoadCacheFile()
 		TitleInfo::CachedInfo cacheEntry;
 		cacheEntry.titleId = titleId;
 		cacheEntry.titleVersion = titleVersion;
+		cacheEntry.sdkVersion = sdkVersion;
 		cacheEntry.titleDataFormat = format;
 		cacheEntry.region = region;
 		cacheEntry.titleName = std::move(name);
@@ -115,6 +117,7 @@ void CafeTitleList::StoreCacheFile()
 		auto titleInfoNode = title_list_node.append_child("title");
 		titleInfoNode.append_attribute("titleId").set_value(fmt::format("{:016x}", info.titleId).c_str());
 		titleInfoNode.append_attribute("version").set_value(fmt::format("{:}", info.titleVersion).c_str());
+		titleInfoNode.append_attribute("sdk_version").set_value(fmt::format("{:}", info.sdkVersion).c_str());
 		titleInfoNode.append_attribute("group_id").set_value(fmt::format("{:08x}", info.group_id).c_str());
 		titleInfoNode.append_attribute("app_type").set_value(fmt::format("{:08x}", info.app_type).c_str());
 		titleInfoNode.append_child("region").append_child(pugi::node_pcdata).set_value(fmt::format("{}", (uint32)info.region).c_str());
@@ -255,6 +258,7 @@ void CafeTitleList::AddTitleFromPath(fs::path path)
 
 bool CafeTitleList::RefreshWorkerThread()
 {
+	SetThreadName("TitleListWorker");
 	while (sTLRefreshRequests.load())
 	{
 		sTLRefreshRequests.store(0);
@@ -321,17 +325,25 @@ bool CafeTitleList::RefreshWorkerThread()
 	return true;
 }
 
-bool _IsKnownFileExtension(std::string fileExtension)
+bool _IsKnownFileNameOrExtension(const fs::path& path)
 {
+	std::string fileExtension = _pathToUtf8(path.extension());
 	for (auto& it : fileExtension)
-		if (it >= 'A' && it <= 'Z')
-			it -= ('A' - 'a');
+		it = _ansiToLower(it);
+	if(fileExtension == ".tmd")
+	{
+		// must be "title.tmd"
+		std::string fileName = _pathToUtf8(path.filename());
+		for (auto& it : fileName)
+			it = _ansiToLower(it);
+		return fileName == "title.tmd";
+	}
 	return
 		fileExtension == ".wud" ||
 		fileExtension == ".wux" ||
 		fileExtension == ".iso" ||
 		fileExtension == ".wua";
-	// note: To detect extracted titles with RPX we use the content/code/meta folder structure
+	// note: To detect extracted titles with RPX we rely on the presence of the content,code,meta directory structure
 }
 
 void CafeTitleList::ScanGamePath(const fs::path& path)
@@ -350,7 +362,6 @@ void CafeTitleList::ScanGamePath(const fs::path& path)
 		else if (it.is_directory(ec))
 		{
 			dirsInDirectory.emplace_back(it.path());
-
 			std::string dirName = _pathToUtf8(it.path().filename());
 			if (boost::iequals(dirName, "content"))
 				hasContentFolder = true;
@@ -363,10 +374,10 @@ void CafeTitleList::ScanGamePath(const fs::path& path)
 	// always check individual files
 	for (auto& it : filesInDirectory)
 	{
-		// since checking files is slow, we only do it for known file extensions
+		// since checking individual files is slow, we limit it to known file names or extensions
 		if (!it.has_extension())
 			continue;
-		if (!_IsKnownFileExtension(_pathToUtf8(it.extension())))
+		if (!_IsKnownFileNameOrExtension(it))
 			continue;
 		AddTitleFromPath(it);
 	}
@@ -623,8 +634,7 @@ GameInfo2 CafeTitleList::GetGameInfo(TitleId titleId)
 	uint64 baseTitleId;
 	if (!FindBaseTitleId(titleId, baseTitleId))
 	{
-		cemuLog_logDebug(LogType::Force, "Failed to translate title id in GetGameInfo()");
-		return gameInfo;
+		cemu_assert_suspicious();
 	}
 	// determine if an optional update title id exists
 	TitleIdParser tip(baseTitleId);
@@ -638,12 +648,15 @@ GameInfo2 CafeTitleList::GetGameInfo(TitleId titleId)
 	{
 		TitleId appTitleId = it->GetAppTitleId();
 		if (appTitleId == baseTitleId)
+		{
 			gameInfo.SetBase(*it);
+		}
 		if (hasSeparateUpdateTitleId && appTitleId == updateTitleId)
 		{
 			gameInfo.SetUpdate(*it);
 		}
 	}
+
 	// if this title can have AOC content then do a second scan
 	// todo - get a list of all AOC title ids from the base/update meta information
 	// for now we assume there is a direct match between the base titleId and the aoc titleId

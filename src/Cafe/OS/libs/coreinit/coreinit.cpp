@@ -35,7 +35,7 @@
 #include "Cafe/OS/libs/coreinit/coreinit_MEM_BlockHeap.h"
 #include "Cafe/OS/libs/coreinit/coreinit_MEM_ExpHeap.h"
 
-coreinitData_t* gCoreinitData = NULL;
+CoreinitSharedData* gCoreinitData = NULL;
 
 sint32 ScoreStackTrace(OSThread_t* thread, MPTR sp)
 {
@@ -111,19 +111,6 @@ void DebugLogStackTrace(OSThread_t* thread, MPTR sp)
 
 		currentStackPtr = nextStackPtr;
 	}
-}
-
-void coreinitExport_OSPanic(PPCInterpreter_t* hCPU)
-{
-	cemuLog_log(LogType::Force, "OSPanic!\n");
-    cemuLog_log(LogType::Force, "File: {}:{}\n", (const char*)memory_getPointerFromVirtualOffset(hCPU->gpr[3]), hCPU->gpr[4]);
-    cemuLog_log(LogType::Force, "Msg: {}\n", (const char*)memory_getPointerFromVirtualOffset(hCPU->gpr[5]));
-	DebugLogStackTrace(coreinit::OSGetCurrentThread(), coreinit::OSGetStackPointer());
-#ifdef CEMU_DEBUG_ASSERT
-	assert_dbg();
-	while (true) std::this_thread::sleep_for(std::chrono::milliseconds(100));
-#endif
-	osLib_returnFromFunction(hCPU, 0);
 }
 
 typedef struct
@@ -217,7 +204,7 @@ namespace coreinit
 {
 	sint32 OSGetCoreId()
 	{
-		return PPCInterpreter_getCoreIndex(ppcInterpreterCurrentInstance);
+		return PPCInterpreter_getCoreIndex(PPCInterpreter_getCurrentInstance());
 	}
 
 	uint32 OSGetCoreCount()
@@ -252,7 +239,7 @@ namespace coreinit
 
 	uint32 OSGetStackPointer()
 	{
-		return ppcInterpreterCurrentInstance->gpr[1];
+		return PPCInterpreter_getCurrentInstance()->gpr[1];
 	}
 
 	void coreinitExport_ENVGetEnvironmentVariable(PPCInterpreter_t* hCPU)
@@ -296,6 +283,17 @@ namespace coreinit
 		return 0;
 	}
 
+	void OSPanic(const char* file, sint32 lineNumber, const char* msg)
+	{
+		cemuLog_log(LogType::Force, "OSPanic!");
+		cemuLog_log(LogType::Force, "File: {}:{}", file, lineNumber);
+		cemuLog_log(LogType::Force, "Msg: {}", msg);
+		DebugLogStackTrace(coreinit::OSGetCurrentThread(), coreinit::OSGetStackPointer());
+#ifdef CEMU_DEBUG_ASSERT
+		while (true) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+#endif
+	}
+
 	void InitializeCore()
 	{
 		cafeExportRegister("coreinit", OSGetCoreId, LogType::CoreinitThread);
@@ -313,6 +311,8 @@ namespace coreinit
 		cafeExportRegister("coreinit", OSIsOffBoot, LogType::CoreinitThread);
 		cafeExportRegister("coreinit", OSGetBootPMFlags, LogType::CoreinitThread);
 		cafeExportRegister("coreinit", OSGetSystemMode, LogType::CoreinitThread);
+
+		cafeExportRegister("coreinit", OSPanic, LogType::Placeholder);
 	}
 };
 
@@ -323,8 +323,8 @@ void coreinit_load()
 	coreinit::InitializeSysHeap();
 
 	// allocate coreinit global data
-	gCoreinitData = (coreinitData_t*)memory_getPointerFromVirtualOffset(coreinit_allocFromSysArea(sizeof(coreinitData_t), 32));
-	memset(gCoreinitData, 0x00, sizeof(coreinitData_t));
+	gCoreinitData = (CoreinitSharedData*)memory_getPointerFromVirtualOffset(coreinit_allocFromSysArea(sizeof(CoreinitSharedData), 32));
+	memset(gCoreinitData, 0x00, sizeof(CoreinitSharedData));
 
 	// coreinit weak links
 	osLib_addVirtualPointer("coreinit", "MEMAllocFromDefaultHeap", memory_getVirtualOffsetFromPointer(&gCoreinitData->MEMAllocFromDefaultHeap));

@@ -486,8 +486,8 @@ struct OSThread_t
 	/* +0x668 */ MPTR								tlsBlocksMPTR;
 
 	/* +0x66C */ MEMPTR<coreinit::OSFastMutex>		waitingForFastMutex;
-	/* +0x670 */ coreinit::OSFastMutexLink			contendedFastMutex; // link or queue?
-	/* +0x678 */ coreinit::OSFastMutexLink			ownedFastMutex; // link or queue?
+	/* +0x670 */ coreinit::OSFastMutexLink			contendedFastMutex;
+	/* +0x678 */ coreinit::OSFastMutexLink			ownedFastMutex;
 
 	/* +0x680 */ uint32								padding680[28 / 4];
 };
@@ -606,6 +606,7 @@ namespace coreinit
 	void __OSQueueThreadDeallocation(OSThread_t* thread);
 
     bool __OSIsThreadActive(OSThread_t* thread);
+	void __OSDeleteAllActivePPCThreads();
 }
 
 #pragma pack()
@@ -614,7 +615,6 @@ namespace coreinit
 void coreinit_suspendThread(OSThread_t* OSThreadBE, sint32 count = 1);
 void coreinit_resumeThread(OSThread_t* OSThreadBE, sint32 count = 1);
 
-MPTR coreinitThread_getCurrentThreadMPTRDepr(PPCInterpreter_t* hCPU);
 OSThread_t* coreinitThread_getCurrentThreadDepr(PPCInterpreter_t* hCPU);
 
 extern MPTR activeThread[256];

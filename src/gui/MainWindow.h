@@ -15,6 +15,7 @@
 
 #include <future>
 #include "Cafe/HW/Espresso/Debugger/GDBStub.h"
+#include "Cafe/CafeSystem.h"
 
 class DebuggerWindow2;
 struct GameEntry;
@@ -50,18 +51,21 @@ private:
 	INITIATED_BY m_initiatedBy;
 };
 
-class MainWindow : public wxFrame
+class MainWindow : public wxFrame, public CafeSystem::SystemImplementation
 {
 	friend class CemuApp;
 
 public:
 	MainWindow();
 	~MainWindow();
-	
+
+    void CreateGameListAndStatusBar();
+    void DestroyGameListAndStatusBar();
+
 	void UpdateSettingsAfterGameLaunch();
 	void RestoreSettingsAfterGameExited();
 
-	bool FileLoad(std::wstring fileName, wxLaunchGameEvent::INITIATED_BY initiatedBy);
+	bool FileLoad(const fs::path launchPath, wxLaunchGameEvent::INITIATED_BY initiatedBy);
 
 	[[nodiscard]] bool IsGameLaunched() const { return m_game_launched; }
 
@@ -88,7 +92,7 @@ public:
 	void OnMouseWheel(wxMouseEvent& event);
 	void OnClose(wxCloseEvent& event);
 	void OnFileMenu(wxCommandEvent& event);
-	void OnOpenCemuFolder(wxCommandEvent& event);
+	void OnOpenFolder(wxCommandEvent& event);
 	void OnLaunchFromFile(wxLaunchGameEvent& event);
 	void OnInstallUpdate(wxCommandEvent& event);
 	void OnFileExit(wxCommandEvent& event);
@@ -96,11 +100,9 @@ public:
 	void OnOptionsInput(wxCommandEvent& event);
 	void OnAccountSelect(wxCommandEvent& event);
 	void OnConsoleLanguage(wxCommandEvent& event);
-	void OnHelpVistWebpage(wxCommandEvent& event);
 	void OnHelpAbout(wxCommandEvent& event);
 	void OnHelpGettingStarted(wxCommandEvent& event);
 	void OnHelpUpdate(wxCommandEvent& event);
-	void OnAfterCallShowErrorDialog();
 	void OnDebugSetting(wxCommandEvent& event);
 	void OnDebugLoggingToggleFlagGeneric(wxCommandEvent& event);
 	void OnPPCInfoToggle(wxCommandEvent& event);
@@ -122,6 +124,7 @@ public:
 	void OnSetWindowTitle(wxCommandEvent& event);
 
 	void OnKeyUp(wxKeyEvent& event);
+	void OnKeyDown(wxKeyEvent& event);
 	void OnChar(wxKeyEvent& event);
 
 	void OnToolsInput(wxCommandEvent& event);
@@ -145,11 +148,15 @@ private:
 	void RecreateMenu();
 	static wxString GetInitialWindowTitle();
 	void ShowGettingStartedDialog();
-	bool EnableOnlineMode() const;
 
 	bool InstallUpdate(const fs::path& metaFilePath);
 
 	void OnTimer(wxTimerEvent& event);
+
+	// CafeSystem implementation
+	void CafeRecreateCanvas() override;
+
+	void OnRequestRecreateCanvas(wxCommandEvent& event);
 
 	wxRect GetDesktopRect();
 
@@ -183,8 +190,6 @@ private:
 	void LoadSettings();
 	void SaveSettings();
 
-	std::string GetRegionString(uint32 region) const;
-
 	void OnGraphicWindowClose(wxCloseEvent& event);
 	void OnGraphicWindowOpen(wxTitleIdEvent& event);
 
@@ -195,42 +200,40 @@ private:
 	wxWindow* m_render_canvas{};
 
 	// gamelist
-	wxGameList* m_game_list;
-	wxInfoBar* m_info_bar;
+	wxGameList* m_game_list{};
+	wxInfoBar* m_info_bar{};
 
 	// menu
-	wxMenuBar* m_menuBar = nullptr;
+	wxMenuBar* m_menuBar{};
 
 	// file
-	wxMenu* m_fileMenu;
-	wxMenuItem* m_fileMenuSeparator0;
-	wxMenuItem* m_fileMenuSeparator1;
-	wxMenuItem* m_loadMenuItem;
-	wxMenuItem* m_installUpdateMenuItem;
-	wxMenuItem* m_exitMenuItem;
+	wxMenu* m_fileMenu{};
+	wxMenuItem* m_fileMenuSeparator0{};
+	wxMenuItem* m_fileMenuSeparator1{};
+	wxMenuItem* m_loadMenuItem{};
+	wxMenuItem* m_installUpdateMenuItem{};
+	wxMenuItem* m_exitMenuItem{};
 
 	// options
-	//wxMenu* m_gpuBufferCacheAccuracySubmenu;
-	wxMenu* m_optionsAccountMenu;
+	wxMenu* m_optionsAccountMenu{};
 
-	wxMenuItem* m_fullscreenMenuItem;
-	wxMenuItem* m_padViewMenuItem;
+	wxMenuItem* m_fullscreenMenuItem{};
+	wxMenuItem* m_padViewMenuItem{};
 
 	// tools
-	wxMenuItem* m_memorySearcherMenuItem;
+	wxMenuItem* m_memorySearcherMenuItem{};
 
 	// cpu
-	//wxMenu* m_cpuModeSubmenu;
-	wxMenu* m_cpuTimerSubmenu;
+	wxMenu* m_cpuTimerSubmenu{};
 
 	// nfc
-	wxMenu* m_nfcMenu;
-	wxMenuItem* m_nfcMenuSeparator0;
+	wxMenu* m_nfcMenu{};
+	wxMenuItem* m_nfcMenuSeparator0{};
 
 	// debug
-	wxMenu* m_debugMenu;
-	wxMenu* m_loggingSubmenu;
-	wxMenuItem* m_asyncCompile;
+	wxMenu* m_debugMenu{};
+	wxMenu* m_loggingSubmenu{};
+	wxMenuItem* m_asyncCompile{};
 
 wxDECLARE_EVENT_TABLE();
 };

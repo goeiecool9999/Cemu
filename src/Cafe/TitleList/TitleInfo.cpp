@@ -77,6 +77,7 @@ TitleInfo::TitleInfo(const fs::path& path, std::string_view subPath)
 	if (!path.has_filename())
 	{
 		m_isValid = false;
+		SetInvalidReason(InvalidReason::BAD_PATH_OR_INACCESSIBLE);
 		return;
 	}
 	m_isValid = true;
@@ -99,6 +100,7 @@ TitleInfo::TitleInfo(const TitleInfo::CachedInfo& cachedInfo)
 	if (cachedInfo.titleDataFormat != TitleDataFormat::HOST_FS &&
 		cachedInfo.titleDataFormat != TitleDataFormat::WIIU_ARCHIVE &&
 		cachedInfo.titleDataFormat != TitleDataFormat::WUD &&
+		cachedInfo.titleDataFormat != TitleDataFormat::NUS &&
 		cachedInfo.titleDataFormat != TitleDataFormat::INVALID_STRUCTURE)
 		return;
 	if (cachedInfo.path.empty())
@@ -127,7 +129,8 @@ TitleInfo::CachedInfo TitleInfo::MakeCacheEntry()
 	e.subPath = m_subPath;
 	e.titleId = GetAppTitleId();
 	e.titleVersion = GetAppTitleVersion();
-	e.titleName = GetTitleName();
+	e.sdkVersion = GetAppSDKVersion();
+	e.titleName = GetMetaTitleName();
 	e.region = GetMetaRegion();
 	e.group_id = GetAppGroup();
 	e.app_type = GetAppType();
@@ -196,10 +199,16 @@ bool TitleInfo::DetectFormat(const fs::path& path, fs::path& pathOut, TitleDataF
 			}
 		}
 		else if (boost::iends_with(filenameStr, ".wud") ||
-			boost::iends_with(filenameStr, ".wux") ||
-			boost::iends_with(filenameStr, ".iso"))
+				 boost::iends_with(filenameStr, ".wux") ||
+				 boost::iends_with(filenameStr, ".iso"))
 		{
 			formatOut = TitleDataFormat::WUD;
+			pathOut = path;
+			return true;
+		}
+		else if (boost::iequals(filenameStr, "title.tmd"))
+		{
+			formatOut = TitleDataFormat::NUS;
 			pathOut = path;
 			return true;
 		}
@@ -261,6 +270,7 @@ bool TitleInfo::DetectFormat(const fs::path& path, fs::path& pathOut, TitleDataF
 			return true;
 		}
 	}
+	SetInvalidReason(InvalidReason::UNKNOWN_FORMAT);
 	return false;
 }
 
@@ -311,6 +321,12 @@ uint64 TitleInfo::GetUID()
 {
 	cemu_assert_debug(m_isValid);
 	return m_uid;
+}
+
+void TitleInfo::SetInvalidReason(InvalidReason reason)
+{
+	if(m_invalidReason == InvalidReason::NONE)
+		m_invalidReason = reason; // only update reason when it hasn't been set before
 }
 
 std::mutex sZArchivePoolMtx;
@@ -374,18 +390,29 @@ bool TitleInfo::Mount(std::string_view virtualPath, std::string_view subfolder, 
 		if (!r)
 		{
 			cemuLog_log(LogType::Force, "Failed to mount {} to {}", virtualPath, subfolder);
+			SetInvalidReason(InvalidReason::BAD_PATH_OR_INACCESSIBLE);
 			return false;
 		}
 	}
-	else if (m_titleFormat == TitleDataFormat::WUD)
+	else if (m_titleFormat == TitleDataFormat::WUD || m_titleFormat == TitleDataFormat::NUS)
 	{
+		FSTVolume::ErrorCode fstError;
 		if (m_mountpoints.empty())
 		{
 			cemu_assert_debug(!m_wudVolume);
-			m_wudVolume = FSTVolume::OpenFromDiscImage(m_fullPath);
+			if(m_titleFormat == TitleDataFormat::WUD)
+				m_wudVolume = FSTVolume::OpenFromDiscImage(m_fullPath, &fstError); // open wud/wux
+			else
+				m_wudVolume = FSTVolume::OpenFromContentFolder(m_fullPath.parent_path(), &fstError); // open from .app files directory, the path points to /title.tmd
 		}
 		if (!m_wudVolume)
+		{
+			if (fstError == FSTVolume::ErrorCode::DISC_KEY_MISSING)
+				SetInvalidReason(InvalidReason::NO_DISC_KEY);
+			else if (fstError == FSTVolume::ErrorCode::TITLE_TIK_MISSING)
+				SetInvalidReason(InvalidReason::NO_TITLE_TIK);
 			return false;
+		}
 		bool r = FSCDeviceWUD_Mount(virtualPath, subfolder, m_wudVolume, mountPriority);
 		cemu_assert_debug(r);
 		if (!r)
@@ -427,22 +454,21 @@ void TitleInfo::Unmount(std::string_view virtualPath)
 			continue;
 		fsc_unmount(itr.second.c_str(), itr.first);
 		std::erase(m_mountpoints, itr);
-		// if the last mount point got unmounted, delete any open devices
+		// if the last mount point got unmounted, close any open devices
 		if (m_mountpoints.empty())
 		{
 			if (m_wudVolume)
 			{
-				cemu_assert_debug(m_titleFormat == TitleDataFormat::WUD);
+				cemu_assert_debug(m_titleFormat == TitleDataFormat::WUD || m_titleFormat == TitleDataFormat::NUS);
 				delete m_wudVolume;
 				m_wudVolume = nullptr;
 			}
-		}
-		// wua files use reference counting
-		if (m_zarchive)
-		{
-			_ZArchivePool_ReleaseInstance(m_fullPath, m_zarchive);
-			if (m_mountpoints.empty())
-				m_zarchive = nullptr;
+            if (m_zarchive)
+            {
+                _ZArchivePool_ReleaseInstance(m_fullPath, m_zarchive);
+                if (m_mountpoints.empty())
+                    m_zarchive = nullptr;
+            }
 		}
 		return;
 	}
@@ -467,7 +493,7 @@ bool TitleInfo::ParseXmlInfo()
 {
 	cemu_assert(m_isValid);
 	if (m_hasParsedXmlFiles)
-		return m_parsedMetaXml && m_parsedAppXml && m_parsedCosXml;
+		return m_isValid;
 	m_hasParsedXmlFiles = true;
 
 	std::string mountPath = GetUniqueTempMountingPath();
@@ -489,10 +515,16 @@ bool TitleInfo::ParseXmlInfo()
 
 	Unmount(mountPath);
 
-	bool hasAnyXml = m_parsedMetaXml || m_parsedAppXml || m_parsedCosXml;
-
-	if (!m_parsedMetaXml || !m_parsedAppXml || !m_parsedCosXml)
+	// some system titles dont have a meta.xml file
+	bool allowMissingMetaXml = false;
+	if(m_parsedAppXml && this->IsSystemDataTitle())
 	{
+		allowMissingMetaXml = true;
+	}
+
+	if ((allowMissingMetaXml == false && !m_parsedMetaXml) || !m_parsedAppXml || !m_parsedCosXml)
+	{
+		bool hasAnyXml = m_parsedMetaXml || m_parsedAppXml || m_parsedCosXml;
 		if (hasAnyXml)
 			cemuLog_log(LogType::Force, "Title has missing meta .xml files. Title path: {}", _pathToUtf8(m_fullPath));
 		delete m_parsedMetaXml;
@@ -502,6 +534,7 @@ bool TitleInfo::ParseXmlInfo()
 		m_parsedAppXml = nullptr;
 		m_parsedCosXml = nullptr;
 		m_isValid = false;
+		SetInvalidReason(InvalidReason::MISSING_XML_FILES);
 		return false;
 	}
 	m_isValid = true;
@@ -531,6 +564,8 @@ bool TitleInfo::ParseAppXml(std::vector<uint8>& appXmlData)
 			m_parsedAppXml->app_type = (uint32)std::stoull(child.text().as_string(), nullptr, 16);
 		else if (name == "group_id")
 			m_parsedAppXml->group_id = (uint32)std::stoull(child.text().as_string(), nullptr, 16);
+		else if (name == "sdk_version")
+			m_parsedAppXml->sdk_version = (uint32)std::stoull(child.text().as_string(), nullptr, 16);
 	}
 	return true;
 }
@@ -553,6 +588,17 @@ uint16 TitleInfo::GetAppTitleVersion() const
 		return m_parsedAppXml->title_version;
 	if (m_cachedInfo)
 		return m_cachedInfo->titleVersion;
+	cemu_assert_suspicious();
+	return 0;
+}
+
+uint32 TitleInfo::GetAppSDKVersion() const
+{
+	cemu_assert_debug(m_isValid);
+	if (m_parsedAppXml)
+		return m_parsedAppXml->sdk_version;
+	if (m_cachedInfo)
+		return m_cachedInfo->sdkVersion;
 	cemu_assert_suspicious();
 	return 0;
 }
@@ -585,7 +631,7 @@ TitleIdParser::TITLE_TYPE TitleInfo::GetTitleType()
 	return tip.GetType();
 }
 
-std::string TitleInfo::GetTitleName() const
+std::string TitleInfo::GetMetaTitleName() const
 {
 	cemu_assert_debug(m_isValid);
 	if (m_parsedMetaXml)
@@ -600,7 +646,6 @@ std::string TitleInfo::GetTitleName() const
 	}
 	if (m_cachedInfo)
 		return m_cachedInfo->titleName;
-	cemu_assert_suspicious();
 	return "";
 }
 
@@ -611,7 +656,6 @@ CafeConsoleRegion TitleInfo::GetMetaRegion() const
 		return m_parsedMetaXml->GetRegion();
 	if (m_cachedInfo)
 		return m_cachedInfo->region;
-	cemu_assert_suspicious();
 	return CafeConsoleRegion::JPN;
 }
 
@@ -646,6 +690,9 @@ std::string TitleInfo::GetPrintPath() const
 		break;
 	case TitleDataFormat::WUD:
 		tmp.append(" [WUD]");
+		break;
+	case TitleDataFormat::NUS:
+		tmp.append(" [NUS]");
 		break;
 	case TitleDataFormat::WIIU_ARCHIVE:
 		tmp.append(" [WUA]");

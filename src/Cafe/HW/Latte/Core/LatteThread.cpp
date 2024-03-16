@@ -44,7 +44,7 @@ LatteTextureView* LatteHandleOSScreen_getOrCreateScreenTex(MPTR physAddress, uin
 	LatteTextureView* texView = LatteTextureViewLookupCache::lookup(physAddress, width, height, 1, pitch, 0, 1, 0, 1, Latte::E_GX2SURFFMT::R8_G8_B8_A8_UNORM, Latte::E_DIM::DIM_2D);
 	if (texView)
 		return texView;
-	return LatteTexture_CreateTexture(0, Latte::E_DIM::DIM_2D, physAddress, 0, Latte::E_GX2SURFFMT::R8_G8_B8_A8_UNORM, width, height, 1, pitch, 1, 0, Latte::E_HWTILEMODE::TM_LINEAR_ALIGNED, false);
+	return LatteTexture_CreateTexture(Latte::E_DIM::DIM_2D, physAddress, 0, Latte::E_GX2SURFFMT::R8_G8_B8_A8_UNORM, width, height, 1, pitch, 1, 0, Latte::E_HWTILEMODE::TM_LINEAR_ALIGNED, false);
 }
 
 void LatteHandleOSScreen_prepareTextures()
@@ -71,8 +71,7 @@ bool LatteHandleOSScreen_TV()
 	const uint32 bufferIndexTV = (bufferDisplayTV);
 	const uint32 bufferIndexDRC = bufferDisplayDRC;
 
-	g_renderer->texture_bindAndActivate(osScreenTVTex[bufferIndexTV], 0);
-	LatteTexture_ReloadData(osScreenTVTex[bufferIndexTV]->baseTexture, 0);
+	LatteTexture_ReloadData(osScreenTVTex[bufferIndexTV]->baseTexture);
 
 	// TV screen
 	LatteRenderTarget_copyToBackbuffer(osScreenTVTex[bufferIndexTV]->baseTexture->baseView, false);
@@ -94,8 +93,7 @@ bool LatteHandleOSScreen_DRC()
 
 	const uint32 bufferIndexDRC = bufferDisplayDRC;
 
-	g_renderer->texture_bindAndActivate(osScreenDRCTex[bufferIndexDRC], 0);
-	LatteTexture_ReloadData(osScreenDRCTex[bufferIndexDRC]->baseTexture, 0);
+	LatteTexture_ReloadData(osScreenDRCTex[bufferIndexDRC]->baseTexture);
 
 	// GamePad screen
 	LatteRenderTarget_copyToBackbuffer(osScreenDRCTex[bufferIndexDRC]->baseTexture->baseView, true);
@@ -142,13 +140,7 @@ int Latte_ThreadEntry()
 	case GfxVendor::AMD: 
 		LatteGPUState.glVendor = GLVENDOR_AMD;
 		break;
-	case GfxVendor::IntelLegacy: 
-		LatteGPUState.glVendor = GLVENDOR_INTEL_LEGACY; 
-		break;
-	case GfxVendor::IntelNoLegacy: 
-		LatteGPUState.glVendor = GLVENDOR_INTEL_NOLEGACY; 
-		break;
-	case GfxVendor::Intel: 
+	case GfxVendor::Intel:
 		LatteGPUState.glVendor = GLVENDOR_INTEL; 
 		break;
 	case GfxVendor::Nvidia: 
@@ -183,9 +175,8 @@ int Latte_ThreadEntry()
 
 	// before doing anything with game specific shaders, we need to wait for graphic packs to finish loading
 	GraphicPack2::WaitUntilReady();
-	// load/init shader cache file
-	LatteShaderCache_load();
-
+	// load disk shader cache
+    LatteShaderCache_Load();
 	// init registers
 	Latte_LoadInitialRegisters();
 	// let CPU thread know the GPU is done initializing
@@ -196,7 +187,7 @@ int Latte_ThreadEntry()
 		std::this_thread::yield();
 		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 		LatteThread_HandleOSScreen();
-		if (!Latte_IsActive())
+		if (Latte_GetStopSignal())
 			LatteThread_Exit();
 	}
 	gxRingBufferReadPtr = gx2WriteGatherPipe.gxRingBuffer;
@@ -232,20 +223,24 @@ void Latte_Stop()
 	sLatteThread.join();
 }
 
-bool Latte_IsActive()
+bool Latte_GetStopSignal()
 {
-	return sLatteThreadRunning;
+	return !sLatteThreadRunning;
 }
 
 void LatteThread_Exit()
 {
 	if (g_renderer)
 		g_renderer->Shutdown();
+    // clean up vertex/uniform cache
+    LatteBufferCache_UnloadAll();
 	// clean up texture cache
 	LatteTC_UnloadAllTextures();
 	// clean up runtime shader cache
-	// todo
-	// destroy renderer but make sure that g_renderer remains valid until the destructor has finished
+    LatteSHRC_UnloadAll();
+    // close disk cache
+    LatteShaderCache_Close();
+    // destroy renderer but make sure that g_renderer remains valid until the destructor has finished
 	if (g_renderer)
 	{
 		Renderer* renderer = g_renderer.get();
