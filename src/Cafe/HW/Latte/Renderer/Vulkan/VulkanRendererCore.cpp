@@ -1194,16 +1194,33 @@ void VulkanRenderer::draw_setRenderPass()
 	// update self-dependency flag
 	if (m_state.descriptorSetsChanged || m_state.activeRenderpassFBO != fboVk)
 	{
-		std::vector selfReferencingTextures = fboVk->CheckForCollision(m_state.activeVertexDS, m_state.activeGeometryDS, m_state.activePixelDS);
-		m_state.hasRenderSelfDependency = !selfReferencingTextures.empty();
-		// transition the self-referencing textures into the loopback layout
-		for (auto& t : selfReferencingTextures)
+		std::vector newSelfReferencingTextures = fboVk->CheckForCollision(m_state.activeVertexDS, m_state.activeGeometryDS, m_state.activePixelDS);
+		m_state.hasRenderSelfDependency = !newSelfReferencingTextures.empty();
+
+		auto transitionAll = [&](const std::vector<LatteTextureViewVk*>& textures, VkImageLayout newLayout)
 		{
-			auto currentAttachmentLayout = t->GetBaseImage()->GetImageLayout(t->m_ImageSubresourceRange);
-			if(currentAttachmentLayout != VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT)
-			{
-				barrier_image<IMAGE_READ | IMAGE_WRITE, IMAGE_READ | IMAGE_WRITE>(t->GetBaseImage(), t->m_ImageSubresourceRange, VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT);
-			}
+		  for (auto& t : textures)
+		  {
+			  auto currentAttachmentLayout = t->GetBaseImage()->GetImageLayout(t->m_ImageSubresourceRange);
+			  if(currentAttachmentLayout != newLayout)
+			  {
+				  barrier_image<IMAGE_READ | IMAGE_WRITE, IMAGE_READ | IMAGE_WRITE>(t->GetBaseImage(), t->m_ImageSubresourceRange, newLayout);
+			  }
+		  }
+		};
+
+		if(m_featureControl.deviceExtensions.attachment_feedback_loop_layout)
+		{
+			// find textures that self-referenced in the previous FBO/DS combo but no in the next one.
+			std::vector<LatteTextureViewVk*> noLongerSelfReferencing{};
+			std::copy_if(m_state.selfReferencingViews.begin(), m_state.selfReferencingViews.end(), std::back_inserter(noLongerSelfReferencing), [&](const auto& view) {
+				return std::find(newSelfReferencingTextures.begin(), newSelfReferencingTextures.end(), view) == newSelfReferencingTextures.end();
+			});
+			transitionAll(noLongerSelfReferencing, VK_IMAGE_LAYOUT_GENERAL);
+
+			// transition the self-referencing textures into the loopback layout
+			transitionAll(newSelfReferencingTextures, VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT);
+			m_state.selfReferencingViews = newSelfReferencingTextures;
 		}
 	}
 
