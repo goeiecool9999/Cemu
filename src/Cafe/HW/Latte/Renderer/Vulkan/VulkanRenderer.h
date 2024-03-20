@@ -440,6 +440,7 @@ private:
 			bool synchronization2 = false; // VK_KHR_synchronization2
 			bool dynamic_rendering = false; // VK_KHR_dynamic_rendering
 			bool shader_float_controls = false; // VK_KHR_shader_float_controls
+			bool attachment_feedback_loop_layout = false; //attachment_feedback_loop_layout
 		}deviceExtensions;
 
 		struct
@@ -894,14 +895,20 @@ private:
 	template<uint32 TSrcSyncOp, uint32 TDstSyncOp>
 	void barrier_image(LatteTextureVk* vkTexture, VkImageSubresourceLayers& subresourceLayers, VkImageLayout newLayout)
 	{
-		VkImage imageVk = vkTexture->GetImageObj()->m_image;
-
 		VkImageSubresourceRange subresourceRange;
 		subresourceRange.aspectMask = subresourceLayers.aspectMask;
 		subresourceRange.baseArrayLayer = subresourceLayers.baseArrayLayer;
 		subresourceRange.layerCount = subresourceLayers.layerCount;
 		subresourceRange.baseMipLevel = subresourceLayers.mipLevel;
 		subresourceRange.levelCount = 1;
+
+		barrier_image<TSrcSyncOp, TDstSyncOp>(vkTexture, subresourceRange, newLayout);
+	}
+
+	template<uint32 TSrcSyncOp, uint32 TDstSyncOp>
+	void barrier_image(LatteTextureVk* vkTexture, VkImageSubresourceRange& subresourceRange, VkImageLayout newLayout)
+	{
+		VkImage imageVk = vkTexture->GetImageObj()->m_image;
 
 		barrier_image<TSrcSyncOp, TDstSyncOp>(imageVk, subresourceRange, vkTexture->GetImageLayout(subresourceRange), newLayout);
 

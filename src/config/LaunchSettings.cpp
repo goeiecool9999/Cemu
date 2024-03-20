@@ -77,8 +77,7 @@ bool LaunchSettings::HandleCommandline(const std::vector<std::wstring>& args)
 
 	po::options_description hidden{ "Hidden options" };
 	hidden.add_options()
-		("nsight", po::value<bool>()->implicit_value(true), "NSight debugging options")
-		("legacy", po::value<bool>()->implicit_value(true), "Intel legacy graphic mode");
+		("nsight", po::value<bool>()->implicit_value(true), "NSight debugging options");
 
 	po::options_description extractor{ "Extractor tool" };
 	extractor.add_options()

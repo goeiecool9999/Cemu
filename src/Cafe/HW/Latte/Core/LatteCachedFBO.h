@@ -97,10 +97,11 @@ public:
 	uint64 key;
 	Vector2i m_size;
 
+	constexpr static size_t maxColorBuffer = 8;
 	struct
 	{
 		LatteTextureView* texture{};
-	}colorBuffer[8]{};
+	}colorBuffer[maxColorBuffer]{};
 	struct
 	{
 		LatteTextureView* texture{};

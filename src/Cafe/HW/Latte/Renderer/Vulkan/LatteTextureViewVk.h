@@ -21,6 +21,8 @@ public:
 	void AddDescriptorSetReference(struct VkDescriptorSetInfo* dsInfo) { if (std::find(list_descriptorSets.begin(), list_descriptorSets.end(), dsInfo) == list_descriptorSets.end()) list_descriptorSets.emplace_back(dsInfo); };
 	void RemoveDescriptorSetReference(struct VkDescriptorSetInfo* dsInfo) { list_descriptorSets.erase(std::remove(list_descriptorSets.begin(), list_descriptorSets.end(), dsInfo), list_descriptorSets.end()); };
 
+	VkImageSubresourceRange m_ImageSubresourceRange{};
+
 private:
 	VkImageViewType GetImageViewTypeFromGX2Dim(Latte::E_DIM dim);
 	VKRObjectTextureView* CreateView(uint32 gpuSamplerSwizzle);

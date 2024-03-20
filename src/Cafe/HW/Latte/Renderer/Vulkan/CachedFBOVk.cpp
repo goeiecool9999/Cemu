@@ -192,8 +192,24 @@ void CachedFBOVk::InitDynamicRenderingData()
 
 uint32 s_currentCollisionCheckIndex = 1;
 
-bool CachedFBOVk::CheckForCollision(VkDescriptorSetInfo* vsDS, VkDescriptorSetInfo* gsDS, VkDescriptorSetInfo* psDS) const
+//find the index of a
+std::optional<size_t> CachedFBOVk::GetColorTextureAttachmentIndex(LatteTexture* tex) const
 {
+	for(size_t i = 0; i < maxColorBuffer; i++)
+	{
+		if(!colorBuffer[i].texture)
+			continue;
+		LatteTexture* base = colorBuffer[i].texture->baseTexture;
+		if(base == tex)
+			return i;
+	}
+	return {};
+}
+
+std::vector<LatteTextureViewVk*> CachedFBOVk::CheckForCollision(VkDescriptorSetInfo* vsDS, VkDescriptorSetInfo* gsDS, VkDescriptorSetInfo* psDS) const
+
+{
+	std::vector<LatteTextureViewVk*> collidedList;
 	s_currentCollisionCheckIndex++;
 	const uint32 curColIndex = s_currentCollisionCheckIndex;
 	for (auto& itr : m_referencedTextures)
@@ -201,29 +217,34 @@ bool CachedFBOVk::CheckForCollision(VkDescriptorSetInfo* vsDS, VkDescriptorSetIn
 		LatteTextureVk* vkTex = (LatteTextureVk*)itr;
 		vkTex->m_collisionCheckIndex = curColIndex;
 	}
-	if (vsDS)
+
+	auto checkDescriptorSetCollision = [&](VkDescriptorSetInfo* dsInfo)
 	{
-		for (auto& itr : vsDS->list_fboCandidates)
-		{
-			if (itr->m_collisionCheckIndex == curColIndex)
-				return true;
-		}
-	}
-	if (gsDS)
-	{
-		for (auto& itr : gsDS->list_fboCandidates)
-		{
-			if (itr->m_collisionCheckIndex == curColIndex)
-				return true;
-		}
-	}
-	if (psDS)
-	{
-		for (auto& itr : psDS->list_fboCandidates)
-		{
-			if (itr->m_collisionCheckIndex == curColIndex)
-				return true;
-		}
-	}
-	return false;
+	  if (dsInfo)
+	  {
+		  for (auto& itr : dsInfo->list_fboCandidates)
+		  {
+			  if (itr->m_collisionCheckIndex == curColIndex)
+			  {
+				  LatteTextureViewVk* texView = nullptr;
+				  auto colorIndex = GetColorTextureAttachmentIndex(itr);
+				  if(colorIndex)
+					  texView = static_cast<LatteTextureViewVk*>(colorBuffer[*colorIndex].texture);
+				  else
+					  texView = static_cast<LatteTextureViewVk*>(depthBuffer.texture);
+
+				  if(!texView)
+					  return;
+
+				  vectorAppendUnique(collidedList, texView);
+			  }
+		  }
+	  }
+	};
+
+	checkDescriptorSetCollision(vsDS);
+	checkDescriptorSetCollision(gsDS);
+	checkDescriptorSetCollision(psDS);
+
+	return collidedList;
 }

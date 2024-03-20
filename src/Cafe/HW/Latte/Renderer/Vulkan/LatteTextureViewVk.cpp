@@ -146,6 +146,7 @@ VKRObjectTextureView* LatteTextureViewVk::CreateView(uint32 gpuSamplerSwizzle)
 	VkImageView view;
 	if (vkCreateImageView(m_device, &viewInfo, nullptr, &view) != VK_SUCCESS)
 		throw std::runtime_error("failed to create texture image view!");
+	m_ImageSubresourceRange = viewInfo.subresourceRange;
 
 	return new VKRObjectTextureView(GetBaseImage()->GetImageObj(), view);
 }
