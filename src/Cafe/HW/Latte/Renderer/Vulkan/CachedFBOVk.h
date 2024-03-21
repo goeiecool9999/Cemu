@@ -31,6 +31,10 @@ public:
 			return m_vkrObjRenderPassSelfReferencing;
 		return m_vkrObjRenderPass;
 	}
+	VKRObjectRenderPass* GetRenderPassObjSelfRef() const
+	{
+		return m_vkrObjRenderPassSelfReferencing;
+	}
 
 	// for KHR_dynamic_rendering
 	VkRenderingInfoKHR* GetRenderingInfo()
