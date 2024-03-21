@@ -3778,8 +3778,25 @@ VKRObjectRenderPass::VKRObjectRenderPass(AttachmentInfo_t& attachmentInfo, bool 
 	renderPassInfo.subpassCount = 1;
 	renderPassInfo.pSubpasses = &subpass;
 
-	renderPassInfo.pDependencies = nullptr;
-	renderPassInfo.dependencyCount = 0;
+	VkSubpassDependency dep;
+	if(feedbackLoop)
+	{
+		// image reads need to happen-before color attachment writes
+		dep.dependencyFlags = VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT;
+		dep.srcStageMask = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT;
+		dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dep.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		dep.srcSubpass = 0;
+		dep.dstSubpass = 0;
+		renderPassInfo.pDependencies = &dep;
+		renderPassInfo.dependencyCount = 1;
+	}
+	else
+	{
+		renderPassInfo.pDependencies = nullptr;
+		renderPassInfo.dependencyCount = 0;
+	}
 	// before Cemu 1.25.5 we used zero here, which means implicit synchronization. For 1.25.5 it was changed to 2 (using the subpass dependencies above)
 	// Reverted this again to zero for Cemu 1.25.5b as the performance cost is just too high. Manual synchronization is preferred
 

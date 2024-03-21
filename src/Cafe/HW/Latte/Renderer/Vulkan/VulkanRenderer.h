@@ -370,7 +370,7 @@ private:
 		bool descriptorSetsChanged{ false };
 		bool updateRenderSelfDependency{ false };
 		bool hasRenderSelfDependency{ false };
-		std::vector<LatteTextureViewVk*> selfReferencingViews;
+		std::vector<LatteTextureVk*> selfReferencingTexs;
 
 		// viewport and scissor box
 		VkViewport currentViewport{};

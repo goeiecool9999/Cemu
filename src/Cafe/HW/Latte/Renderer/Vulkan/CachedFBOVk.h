@@ -20,6 +20,8 @@ public:
 
 	VKRObjectFramebuffer* GetFramebufferObj() const
 	{
+		if(HasFeedbackLoop())
+			return m_vkrObjFramebufferSelfReferencing;
 		return m_vkrObjFramebuffer;
 	}
 
@@ -55,7 +57,7 @@ public:
 
 	// checks if any of the sampled textures are output by the FBO
 	void UpdateFeedbackLoop(VkDescriptorSetInfo* vsDS, VkDescriptorSetInfo* gsDS, VkDescriptorSetInfo* psDS);
-	std::vector<LatteTextureViewVk*> GetFeedbackLoopedTextures() const;
+	std::vector<LatteTextureVk*> GetFeedbackLoopedTextures() const;
 	bool HasFeedbackLoop() const;
 
 private:
@@ -73,10 +75,10 @@ private:
 	VKRObjectRenderPass* m_vkrObjRenderPass{};
 	VKRObjectRenderPass* m_vkrObjRenderPassSelfReferencing{};
 	VKRObjectFramebuffer* m_vkrObjFramebuffer{};
+	VKRObjectFramebuffer* m_vkrObjFramebufferSelfReferencing{};
 
 	VkExtent2D m_extend;
 
-	std::vector<LatteTextureViewVk*> m_feedbackLoopSourceImages;
 	std::bitset<maxColorBuffer> m_feedbackLoopColorAttachments;
 	bool m_feedbackLoopDepth{};
 

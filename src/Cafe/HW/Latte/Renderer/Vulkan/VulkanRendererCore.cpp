@@ -1192,23 +1192,23 @@ void VulkanRenderer::draw_setRenderPass()
 	CachedFBOVk* fboVk = m_state.activeFBO;
 
 
-	std::vector<LatteTextureViewVk*> noLongerSelfReferencing;
-	std::vector<LatteTextureViewVk*> newSelfReferencingTextures;
+	std::vector<LatteTextureVk*> noLongerSelfReferencing;
+	std::vector<LatteTextureVk*> newSelfReferencingTextures;
 	if (m_state.updateRenderSelfDependency)
 	{
-		std::vector<LatteTextureViewVk*> currentSelfReferencing = fboVk->GetFeedbackLoopedTextures();
+		std::vector<LatteTextureVk*> currentSelfReferencing = fboVk->GetFeedbackLoopedTextures();
 
 		if(m_featureControl.deviceExtensions.attachment_feedback_loop_layout)
 		{
 			// find textures that self-referenced in the previous FBO/DS combo but not in the next one.
-			std::copy_if(m_state.selfReferencingViews.begin(), m_state.selfReferencingViews.end(), std::back_inserter(noLongerSelfReferencing), [&](const auto& view) {
+			std::copy_if(m_state.selfReferencingTexs.begin(), m_state.selfReferencingTexs.end(), std::back_inserter(noLongerSelfReferencing), [&](const auto& view) {
 			  return std::find(currentSelfReferencing.begin(), currentSelfReferencing.end(), view) == currentSelfReferencing.end();
 			});
 			// find textures that self-referenced in the next FBO/DS combo but not in the previous one.
 			std::copy_if(currentSelfReferencing.begin(), currentSelfReferencing.end(), std::back_inserter(newSelfReferencingTextures), [&](const auto& view) {
-			  return std::find(m_state.selfReferencingViews.begin(), m_state.selfReferencingViews.end(), view) == m_state.selfReferencingViews.end();
+			  return std::find(m_state.selfReferencingTexs.begin(), m_state.selfReferencingTexs.end(), view) == m_state.selfReferencingTexs.end();
 			});
-			m_state.selfReferencingViews = currentSelfReferencing;
+			m_state.selfReferencingTexs = currentSelfReferencing;
 		}
 	}
 
@@ -1235,18 +1235,24 @@ void VulkanRenderer::draw_setRenderPass()
 
 	sync_RenderPassLoadTextures(fboVk);
 
-	if(layoutUpdatesRequired && m_featureControl.deviceExtensions.attachment_feedback_loop_layout)
+	if (layoutUpdatesRequired && m_featureControl.deviceExtensions.attachment_feedback_loop_layout)
 	{
-		auto transitionAll = [&](const std::vector<LatteTextureViewVk*>& textures, VkImageLayout newLayout)
-		{
-		  for (auto& t : textures)
-		  {
-			  auto currentAttachmentLayout = t->GetBaseImage()->GetImageLayout(t->m_ImageSubresourceRange);
-			  if(currentAttachmentLayout != newLayout)
-			  {
-				  barrier_image<IMAGE_READ | IMAGE_WRITE, IMAGE_READ | IMAGE_WRITE>(t->GetBaseImage(), t->m_ImageSubresourceRange, newLayout);
-			  }
-		  }
+		auto transitionAll = [&](const std::vector<LatteTextureVk*>& textures, VkImageLayout newLayout) {
+			for (auto& t : textures)
+			{
+				for (size_t slice = 0; slice < t->depth; slice++)
+				{
+					for (size_t mip = 0; mip < t->mipLevels; mip++)
+					{
+						VkImageSubresourceLayers layers{};
+						layers.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+						layers.baseArrayLayer = slice;
+						layers.layerCount = 1;
+						layers.mipLevel = mip;
+						barrier_image<IMAGE_READ | IMAGE_WRITE, IMAGE_READ | IMAGE_WRITE>(t, layers, newLayout);
+					}
+				}
+			}
 		};
 		transitionAll(noLongerSelfReferencing, VK_IMAGE_LAYOUT_GENERAL);
 

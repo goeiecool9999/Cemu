@@ -95,6 +95,7 @@ void CachedFBOVk::CreateFramebuffer()
 	cemu_assert_debug(imageViewIndex < 9);
 
 	m_vkrObjFramebuffer = new VKRObjectFramebuffer(m_vkrObjRenderPass, std::span<VKRObjectTextureView*>(imageViews.data(), imageViewIndex), m_size);
+	m_vkrObjFramebufferSelfReferencing = new VKRObjectFramebuffer(m_vkrObjRenderPassSelfReferencing, std::span<VKRObjectTextureView*>(imageViews.data(), imageViewIndex), m_size);
 
 	m_extend = { (uint32)m_size.x, (uint32)m_size.y };
 }
@@ -207,20 +208,18 @@ std::optional<size_t> CachedFBOVk::GetColorTextureAttachmentIndex(LatteTexture* 
 	return {};
 }
 
-std::vector<LatteTextureViewVk*> CachedFBOVk::GetFeedbackLoopedTextures() const
+std::vector<LatteTextureVk*> CachedFBOVk::GetFeedbackLoopedTextures() const
 {
 	if(!HasFeedbackLoop())
 		return {};
-	std::vector<LatteTextureViewVk*> loopbackedTextures;
+	std::vector<LatteTextureVk*> loopbackedTextures;
 	for(size_t i = 0 ; i < maxColorBuffer; i++)
 	{
 		if(colorBuffer[i].texture)
-			loopbackedTextures.emplace_back(static_cast<LatteTextureViewVk*>(colorBuffer[i].texture));
+			loopbackedTextures.emplace_back(static_cast<LatteTextureVk*>(colorBuffer[i].texture->baseTexture));
 	}
 	if(m_feedbackLoopDepth)
 		cemu_assert_unimplemented();
-
-	std::copy(m_feedbackLoopSourceImages.begin(), m_feedbackLoopSourceImages.end(), std::back_inserter(loopbackedTextures));
 
 	return loopbackedTextures;
 }
@@ -241,13 +240,11 @@ void CachedFBOVk::UpdateFeedbackLoop(VkDescriptorSetInfo* vsDS, VkDescriptorSetI
 	}
 	m_feedbackLoopColorAttachments = {};
 	m_feedbackLoopDepth = false;
-	m_feedbackLoopSourceImages = {};
 
 	auto checkDescriptorSetCollision = [&](VkDescriptorSetInfo* dsInfo)
 	{
 	  if (dsInfo)
 	  {
-		  bool foundSelfReference = false;
 		  for (auto& itr : dsInfo->list_fboCandidates)
 		  {
 			  if (itr->m_collisionCheckIndex == curColIndex)
@@ -257,15 +254,8 @@ void CachedFBOVk::UpdateFeedbackLoop(VkDescriptorSetInfo* vsDS, VkDescriptorSetI
 					  m_feedbackLoopColorAttachments.set(*colorIndex, true);
 				  else
 					  m_feedbackLoopDepth = true;
-				  foundSelfReference = true;
 			  }
 		  }
-		  if(foundSelfReference)
-		  {
-			  for (auto& itr: dsInfo->list_referencedViews)
-				  m_feedbackLoopSourceImages.emplace_back(itr);
-		  }
-
 	  }
 	};
 
