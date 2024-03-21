@@ -1220,23 +1220,13 @@ void VulkanRenderer::draw_setRenderPass()
 	auto vkObjRenderPass = fboVk->GetRenderPassObj();
 	auto vkObjFramebuffer = fboVk->GetFramebufferObj();
 
-	if (fboVk->HasFeedbackLoop() && !m_featureControl.deviceExtensions.attachment_feedback_loop_layout)
-	{
-		bool triggerBarrier = GetConfig().vk_accurate_barriers || m_state.activePipelineInfo->neverSkipAccurateBarrier;
-		if (triggerBarrier)
-		{
-			VkMemoryBarrier memoryBarrier{};
-			memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-			memoryBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-			memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-			VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-			vkCmdPipelineBarrier(m_state.currentCommandBuffer, srcStage, dstStage, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
-			performanceMonitor.vk.numDrawBarriersPerFrame.increment();
-		}
-	}
+	const bool canSkipSync = m_featureControl.deviceExtensions.attachment_feedback_loop_layout;
+	const bool layoutUpdatesRequired = noLongerSelfReferencing.empty() && newSelfReferencingTextures.empty();
 
-	if (m_state.activeRenderpassFBO == fboVk && noLongerSelfReferencing.empty() && newSelfReferencingTextures.empty())
+	const bool syncRequired = GetConfig().vk_accurate_barriers || m_state.activePipelineInfo->neverSkipAccurateBarrier || !canSkipSync
+	    || layoutUpdatesRequired;
+
+	if (!syncRequired && m_state.activeRenderpassFBO == fboVk)
 	{
 		if (m_state.descriptorSetsChanged)
 			sync_inputTexturesChanged();
