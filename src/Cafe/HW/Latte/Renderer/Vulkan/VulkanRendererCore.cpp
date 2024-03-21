@@ -1191,11 +1191,6 @@ void VulkanRenderer::draw_setRenderPass()
 {
 	CachedFBOVk* fboVk = m_state.activeFBO;
 
-	// update self-dependency flag
-	if (m_state.descriptorSetsChanged || m_state.activeRenderpassFBO != fboVk)
-	{
-		std::vector newSelfReferencingTextures = fboVk->CheckForCollision(m_state.activeVertexDS, m_state.activeGeometryDS, m_state.activePixelDS);
-		m_state.hasRenderSelfDependency = !newSelfReferencingTextures.empty();
 
 	std::vector<LatteTextureViewVk*> noLongerSelfReferencing;
 	std::vector<LatteTextureViewVk*> newSelfReferencingTextures;
@@ -1221,12 +1216,13 @@ void VulkanRenderer::draw_setRenderPass()
 	auto vkObjFramebuffer = fboVk->GetFramebufferObj();
 
 	const bool canSkipSync = m_featureControl.deviceExtensions.attachment_feedback_loop_layout;
-	const bool layoutUpdatesRequired = noLongerSelfReferencing.empty() && newSelfReferencingTextures.empty();
+	const bool layoutUpdatesRequired = !noLongerSelfReferencing.empty() || !newSelfReferencingTextures.empty();
 
-	const bool syncRequired = GetConfig().vk_accurate_barriers || m_state.activePipelineInfo->neverSkipAccurateBarrier || !canSkipSync
-	    || layoutUpdatesRequired;
+	const bool endPassNecessary = fboVk->HasFeedbackLoop() && !canSkipSync && (GetConfig().vk_accurate_barriers || m_state.activePipelineInfo->neverSkipAccurateBarrier)
+							  || layoutUpdatesRequired;
 
-	if (!syncRequired && m_state.activeRenderpassFBO == fboVk)
+
+	if (!endPassNecessary && m_state.activeRenderpassFBO == fboVk)
 	{
 		if (m_state.descriptorSetsChanged)
 			sync_inputTexturesChanged();
@@ -1455,29 +1451,6 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 	m_streamoutState.verticesPerInstance = count;
 	LatteStreamout_PrepareDrawcall(count, instanceCount);
 
-	// update descriptor sets
-	VkDescriptorSetInfo *vertexDS = nullptr, *pixelDS = nullptr, *geometryDS = nullptr;
-	if (!isFirst && m_state.activeVertexDS)
-	{
-		vertexDS = m_state.activeVertexDS;
-		pixelDS = m_state.activePixelDS;
-		geometryDS = m_state.activeGeometryDS;
-		m_state.descriptorSetsChanged = false;
-	}
-	else
-	{
-		m_state.activeVertexDS = vertexDS;
-		m_state.activePixelDS = pixelDS;
-		m_state.activeGeometryDS = geometryDS;
-		m_state.descriptorSetsChanged = true;
-	}
-
-	CachedFBOVk* fboVk = m_state.activeFBO;
-	m_state.updateRenderSelfDependency = m_state.descriptorSetsChanged || m_state.activeRenderpassFBO != fboVk;
-
-	if(m_state.updateRenderSelfDependency)
-		fboVk->UpdateFeedbackLoop(m_state.activeVertexDS, m_state.activeGeometryDS, m_state.activePixelDS);
-
 	// update uniform vars
 	LatteDecompilerShader* vertexShader = LatteSHRC_GetActiveVertexShader();
 	LatteDecompilerShader* pixelShader = LatteSHRC_GetActivePixelShader();
@@ -1527,8 +1500,30 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 		return;
 	}
 
-	if(m_state.descriptorSetsChanged)
+	// update descriptor sets
+	VkDescriptorSetInfo *vertexDS = nullptr, *pixelDS = nullptr, *geometryDS = nullptr;
+	if (!isFirst && m_state.activeVertexDS)
+	{
+		vertexDS = m_state.activeVertexDS;
+		pixelDS = m_state.activePixelDS;
+		geometryDS = m_state.activeGeometryDS;
+		m_state.descriptorSetsChanged = false;
+	}
+	else
+	{
 		draw_prepareDescriptorSets(pipeline_info, vertexDS, pixelDS, geometryDS);
+		m_state.activeVertexDS = vertexDS;
+		m_state.activePixelDS = pixelDS;
+		m_state.activeGeometryDS = geometryDS;
+		m_state.descriptorSetsChanged = true;
+	}
+
+	CachedFBOVk* fboVk = m_state.activeFBO;
+	m_state.updateRenderSelfDependency = m_state.descriptorSetsChanged || m_state.activeRenderpassFBO != fboVk;
+
+	if(m_state.updateRenderSelfDependency)
+		fboVk->UpdateFeedbackLoop(m_state.activeVertexDS, m_state.activeGeometryDS, m_state.activePixelDS);
+
 
 	draw_setRenderPass();
 
