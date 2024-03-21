@@ -620,8 +620,8 @@ VkDescriptorSetInfo* VulkanRenderer::draw_getOrCreateDescriptorSet(PipelineInfo*
 
 	sint32 textureCount = shader->resourceMapping.getTextureCount();
 
-	std::vector<VkWriteDescriptorSet> descriptorWrites;
-	std::vector<VkDescriptorImageInfo> textureArray;
+	auto& descriptorWrites = dsInfo->descriptorWrites = {};
+	auto& textureArray = dsInfo->textureArray = {};
 	for (int i = 0; i < textureCount; ++i)
 	{
 		VkDescriptorImageInfo info{};
@@ -1528,6 +1528,32 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 
 
 	draw_setRenderPass();
+
+	// update descriptor sets so samplers use correct layout
+	auto setDescriptorSamplerFormats = [&](VkDescriptorSetInfo * dsInfo, bool hasFeedbackLoop)
+	{
+		if(!dsInfo)
+			return;
+		if(dsInfo->feedbackLoopLayout == hasFeedbackLoop)
+			return;
+
+		std::vector<VkWriteDescriptorSet> imageWrites;
+		std::copy_if(dsInfo->descriptorWrites.begin(), dsInfo->descriptorWrites.end(), std::back_inserter(imageWrites), [](const VkWriteDescriptorSet& w){
+			return w.pImageInfo;
+		});
+
+		for(auto& texture : dsInfo->textureArray)
+		{
+			texture.imageLayout = hasFeedbackLoop ? VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT : VK_IMAGE_LAYOUT_GENERAL;
+		}
+
+		vkUpdateDescriptorSets(m_logicalDevice, imageWrites.size(), imageWrites.data(), 0, nullptr);
+		dsInfo->feedbackLoopLayout = hasFeedbackLoop;
+	};
+
+	setDescriptorSamplerFormats(vertexDS, m_state.hasRenderSelfDependency);
+	setDescriptorSamplerFormats(pixelDS, m_state.hasRenderSelfDependency);
+	setDescriptorSamplerFormats(geometryDS, m_state.hasRenderSelfDependency);
 
 	if (m_state.currentPipeline != vkObjPipeline->pipeline)
 	{

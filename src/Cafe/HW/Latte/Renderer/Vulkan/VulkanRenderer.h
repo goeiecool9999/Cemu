@@ -33,6 +33,9 @@ struct VkDescriptorSetInfo
 	LatteConst::ShaderType shaderType{};
 	uint64 stateHash{};
 	class PipelineInfo* pipeline_info{};
+	std::vector<VkWriteDescriptorSet> descriptorWrites;
+	std::vector<VkDescriptorImageInfo> textureArray;
+	bool feedbackLoopLayout = false;
 
 	// tracking for allocated descriptors
 	uint8 statsNumSamplerTextures{ 0 };

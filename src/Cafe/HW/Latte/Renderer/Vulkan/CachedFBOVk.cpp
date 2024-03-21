@@ -209,14 +209,16 @@ std::optional<size_t> CachedFBOVk::GetColorTextureAttachmentIndex(LatteTexture* 
 
 std::vector<LatteTextureViewVk*> CachedFBOVk::GetFeedbackLoopedTextures() const
 {
+	if(!HasFeedbackLoop())
+		return {};
 	std::vector<LatteTextureViewVk*> loopbackedTextures;
 	for(size_t i = 0 ; i < maxColorBuffer; i++)
 	{
-		if(m_feedbackLoopColorAttachments[i])
+		if(colorBuffer[i].texture)
 			loopbackedTextures.emplace_back(static_cast<LatteTextureViewVk*>(colorBuffer[i].texture));
 	}
 	if(m_feedbackLoopDepth)
-		loopbackedTextures.emplace_back(static_cast<LatteTextureViewVk*>(depthBuffer.texture));
+		cemu_assert_unimplemented();
 
 	return loopbackedTextures;
 }
