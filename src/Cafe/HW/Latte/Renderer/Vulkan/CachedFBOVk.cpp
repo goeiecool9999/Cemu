@@ -36,7 +36,8 @@ void CachedFBOVk::CreateRenderPass()
 		attachmentInfo.depthAttachment.viewObj = nullptr;
 	}
 
-	m_vkrObjRenderPass = new VKRObjectRenderPass(attachmentInfo);
+	m_vkrObjRenderPass = new VKRObjectRenderPass(attachmentInfo, false);
+	m_vkrObjRenderPassSelfReferencing = new VKRObjectRenderPass(attachmentInfo, true);
 }
 
 CachedFBOVk::~CachedFBOVk()
@@ -234,6 +235,8 @@ void CachedFBOVk::UpdateFeedbackLoop(VkDescriptorSetInfo* vsDS, VkDescriptorSetI
 		LatteTextureVk* vkTex = (LatteTextureVk*)itr;
 		vkTex->m_collisionCheckIndex = curColIndex;
 	}
+	m_feedbackLoopColorAttachments = {};
+	m_feedbackLoopDepth = false;
 
 	auto checkDescriptorSetCollision = [&](VkDescriptorSetInfo* dsInfo)
 	{

@@ -1219,7 +1219,8 @@ void VulkanRenderer::draw_setRenderPass()
 	const bool layoutUpdatesRequired = !noLongerSelfReferencing.empty() || !newSelfReferencingTextures.empty();
 
 	const bool endPassNecessary = fboVk->HasFeedbackLoop() && !canSkipSync && (GetConfig().vk_accurate_barriers || m_state.activePipelineInfo->neverSkipAccurateBarrier)
-							  || layoutUpdatesRequired;
+							  || layoutUpdatesRequired
+		                      || (m_state.hasRenderSelfDependency != fboVk->HasFeedbackLoop());
 
 
 	if (!endPassNecessary && m_state.activeRenderpassFBO == fboVk)
@@ -1234,7 +1235,7 @@ void VulkanRenderer::draw_setRenderPass()
 
 	sync_RenderPassLoadTextures(fboVk);
 
-	if(m_state.updateRenderSelfDependency && m_featureControl.deviceExtensions.attachment_feedback_loop_layout)
+	if(layoutUpdatesRequired && m_featureControl.deviceExtensions.attachment_feedback_loop_layout)
 	{
 		auto transitionAll = [&](const std::vector<LatteTextureViewVk*>& textures, VkImageLayout newLayout)
 		{
@@ -1275,6 +1276,7 @@ void VulkanRenderer::draw_setRenderPass()
 	}
 
 	m_state.activeRenderpassFBO = fboVk;
+	m_state.hasRenderSelfDependency = fboVk->HasFeedbackLoop();
 
 	vkObjRenderPass->flagForCurrentCommandBuffer();
 	vkObjFramebuffer->flagForCurrentCommandBuffer();

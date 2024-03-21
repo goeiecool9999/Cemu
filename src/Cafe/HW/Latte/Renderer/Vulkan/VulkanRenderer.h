@@ -366,6 +366,7 @@ private:
 		VkDescriptorSetInfo* activeGeometryDS{ nullptr };
 		bool descriptorSetsChanged{ false };
 		bool updateRenderSelfDependency{ false };
+		bool hasRenderSelfDependency{ false };
 		std::vector<LatteTextureViewVk*> selfReferencingViews;
 
 		// viewport and scissor box

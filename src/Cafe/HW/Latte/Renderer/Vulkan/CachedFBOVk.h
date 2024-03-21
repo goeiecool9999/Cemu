@@ -25,6 +25,8 @@ public:
 
 	VKRObjectRenderPass* GetRenderPassObj() const
 	{
+		if(HasFeedbackLoop())
+			return m_vkrObjRenderPassSelfReferencing;
 		return m_vkrObjRenderPass;
 	}
 
@@ -69,6 +71,7 @@ private:
 
 	VkDevice m_device;
 	VKRObjectRenderPass* m_vkrObjRenderPass{};
+	VKRObjectRenderPass* m_vkrObjRenderPassSelfReferencing{};
 	VKRObjectFramebuffer* m_vkrObjFramebuffer{};
 
 	VkExtent2D m_extend;

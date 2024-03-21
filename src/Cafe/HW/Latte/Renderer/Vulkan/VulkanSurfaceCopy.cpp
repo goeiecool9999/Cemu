@@ -214,7 +214,7 @@ VKRObjectRenderPass* VulkanRenderer::copySurface_createRenderpass(VkCopySurfaceS
 		attachmentInfo.colorAttachment[0].format = state.destinationTexture->GetFormat();
 	}
 
-	VKRObjectRenderPass* vkObjRenderPass = new VKRObjectRenderPass(attachmentInfo, 1);
+	VKRObjectRenderPass* vkObjRenderPass = new VKRObjectRenderPass(attachmentInfo, false, 1);
 
 	return vkObjRenderPass;
 }
