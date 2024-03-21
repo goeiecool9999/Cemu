@@ -994,7 +994,8 @@ bool PipelineCompiler::Compile(bool forceCompile, bool isRenderThread, bool show
 	pipelineInfo.pDepthStencilState = &depthStencilState;
 	pipelineInfo.subpass = 0;
 	pipelineInfo.basePipelineHandle = nullptr;
-	pipelineInfo.flags = 0;
+	// TODO: base this on feature flag, also maybe don't use these flags on all pipelines.
+	pipelineInfo.flags = VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT | VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT;
 	if (!forceCompile)
 		pipelineInfo.flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT;
 

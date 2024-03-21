@@ -52,7 +52,9 @@ public:
 	[[nodiscard]] const VkExtent2D& GetExtend() const { return m_extend;}
 
 	// checks if any of the sampled textures are output by the FBO
-	std::vector<LatteTextureViewVk*> CheckForCollision(VkDescriptorSetInfo* vsDS, VkDescriptorSetInfo* gsDS, VkDescriptorSetInfo* psDS) const;
+	void UpdateFeedbackLoop(VkDescriptorSetInfo* vsDS, VkDescriptorSetInfo* gsDS, VkDescriptorSetInfo* psDS);
+	std::vector<LatteTextureViewVk*> GetFeedbackLoopedTextures() const;
+	bool HasFeedbackLoop() const;
 
 private:
 
@@ -71,9 +73,12 @@ private:
 
 	VkExtent2D m_extend;
 
+	std::bitset<maxColorBuffer> m_feedbackLoopColorAttachments;
+	bool m_feedbackLoopDepth{};
+
 	// for KHR_dynamic_rendering
 	VkRenderingInfoKHR m_vkRenderingInfo;
-	VkRenderingAttachmentInfoKHR m_vkColorAttachments[8];
+	VkRenderingAttachmentInfoKHR m_vkColorAttachments[maxColorBuffer];
 	VkRenderingAttachmentInfoKHR m_vkDepthAttachment;
 	VkRenderingAttachmentInfoKHR m_vkStencilAttachment;
 

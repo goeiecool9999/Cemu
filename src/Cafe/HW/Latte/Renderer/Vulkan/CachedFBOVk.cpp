@@ -206,10 +206,27 @@ std::optional<size_t> CachedFBOVk::GetColorTextureAttachmentIndex(LatteTexture* 
 	return {};
 }
 
-std::vector<LatteTextureViewVk*> CachedFBOVk::CheckForCollision(VkDescriptorSetInfo* vsDS, VkDescriptorSetInfo* gsDS, VkDescriptorSetInfo* psDS) const
-
+std::vector<LatteTextureViewVk*> CachedFBOVk::GetFeedbackLoopedTextures() const
 {
-	std::vector<LatteTextureViewVk*> collidedList;
+	std::vector<LatteTextureViewVk*> loopbackedTextures;
+	for(size_t i = 0 ; i < maxColorBuffer; i++)
+	{
+		if(m_feedbackLoopColorAttachments[i])
+			loopbackedTextures.emplace_back(static_cast<LatteTextureViewVk*>(colorBuffer[i].texture));
+	}
+	if(m_feedbackLoopDepth)
+		loopbackedTextures.emplace_back(static_cast<LatteTextureViewVk*>(depthBuffer.texture));
+
+	return loopbackedTextures;
+}
+
+bool CachedFBOVk::HasFeedbackLoop() const
+{
+	return m_feedbackLoopDepth || m_feedbackLoopColorAttachments.any();
+}
+
+void CachedFBOVk::UpdateFeedbackLoop(VkDescriptorSetInfo* vsDS, VkDescriptorSetInfo* gsDS, VkDescriptorSetInfo* psDS)
+{
 	s_currentCollisionCheckIndex++;
 	const uint32 curColIndex = s_currentCollisionCheckIndex;
 	for (auto& itr : m_referencedTextures)
@@ -226,17 +243,11 @@ std::vector<LatteTextureViewVk*> CachedFBOVk::CheckForCollision(VkDescriptorSetI
 		  {
 			  if (itr->m_collisionCheckIndex == curColIndex)
 			  {
-				  LatteTextureViewVk* texView = nullptr;
 				  auto colorIndex = GetColorTextureAttachmentIndex(itr);
 				  if(colorIndex)
-					  texView = static_cast<LatteTextureViewVk*>(colorBuffer[*colorIndex].texture);
+					  m_feedbackLoopColorAttachments.set(*colorIndex, true);
 				  else
-					  texView = static_cast<LatteTextureViewVk*>(depthBuffer.texture);
-
-				  if(!texView)
-					  return;
-
-				  vectorAppendUnique(collidedList, texView);
+					  m_feedbackLoopDepth = true;
 			  }
 		  }
 	  }
@@ -246,5 +257,5 @@ std::vector<LatteTextureViewVk*> CachedFBOVk::CheckForCollision(VkDescriptorSetI
 	checkDescriptorSetCollision(gsDS);
 	checkDescriptorSetCollision(psDS);
 
-	return collidedList;
+	return;
 }

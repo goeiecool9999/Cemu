@@ -365,7 +365,7 @@ private:
 		VkDescriptorSetInfo* activePixelDS{ nullptr };
 		VkDescriptorSetInfo* activeGeometryDS{ nullptr };
 		bool descriptorSetsChanged{ false };
-		bool hasRenderSelfDependency{ false }; // set if current drawcall samples textures which are also output as a rendertarget
+		bool updateRenderSelfDependency{ false };
 		std::vector<LatteTextureViewVk*> selfReferencingViews;
 
 		// viewport and scissor box
