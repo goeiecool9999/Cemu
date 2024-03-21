@@ -220,6 +220,8 @@ std::vector<LatteTextureViewVk*> CachedFBOVk::GetFeedbackLoopedTextures() const
 	if(m_feedbackLoopDepth)
 		cemu_assert_unimplemented();
 
+	std::copy(m_feedbackLoopSourceImages.begin(), m_feedbackLoopSourceImages.end(), std::back_inserter(loopbackedTextures));
+
 	return loopbackedTextures;
 }
 
@@ -239,11 +241,13 @@ void CachedFBOVk::UpdateFeedbackLoop(VkDescriptorSetInfo* vsDS, VkDescriptorSetI
 	}
 	m_feedbackLoopColorAttachments = {};
 	m_feedbackLoopDepth = false;
+	m_feedbackLoopSourceImages = {};
 
 	auto checkDescriptorSetCollision = [&](VkDescriptorSetInfo* dsInfo)
 	{
 	  if (dsInfo)
 	  {
+		  bool foundSelfReference = false;
 		  for (auto& itr : dsInfo->list_fboCandidates)
 		  {
 			  if (itr->m_collisionCheckIndex == curColIndex)
@@ -253,8 +257,15 @@ void CachedFBOVk::UpdateFeedbackLoop(VkDescriptorSetInfo* vsDS, VkDescriptorSetI
 					  m_feedbackLoopColorAttachments.set(*colorIndex, true);
 				  else
 					  m_feedbackLoopDepth = true;
+				  foundSelfReference = true;
 			  }
 		  }
+		  if(foundSelfReference)
+		  {
+			  for (auto& itr: dsInfo->list_referencedViews)
+				  m_feedbackLoopSourceImages.emplace_back(itr);
+		  }
+
 	  }
 	};
 

@@ -76,6 +76,7 @@ private:
 
 	VkExtent2D m_extend;
 
+	std::vector<LatteTextureViewVk*> m_feedbackLoopSourceImages;
 	std::bitset<maxColorBuffer> m_feedbackLoopColorAttachments;
 	bool m_feedbackLoopDepth{};
 
