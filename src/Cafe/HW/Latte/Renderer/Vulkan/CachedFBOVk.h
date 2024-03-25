@@ -85,6 +85,7 @@ private:
 
 	std::bitset<maxColorBuffer> m_feedbackLoopColorAttachments;
 	bool m_feedbackLoopDepth{};
+	std::vector<LatteTextureVk*> loopbackedTextures;
 
 	// for KHR_dynamic_rendering
 	VkRenderingInfoKHR m_vkRenderingInfo;

@@ -1444,7 +1444,7 @@ void VulkanRenderer::CreateNullTexture(NullTexture& nullTex, VkImageType imageTy
 		cemu_assert(false);
 	}
 	imageInfo.mipLevels = 1;
-	imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT;
 	imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
 	imageInfo.extent.depth = 1;
@@ -3809,8 +3809,8 @@ VKRObjectRenderPass::VKRObjectRenderPass(AttachmentInfo_t& attachmentInfo, bool 
 	{
 		// image reads need to happen-before color attachment writes
 		dep.dependencyFlags = VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT;
-		dep.srcStageMask = VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
-		dep.dstStageMask = VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
+		dep.srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+		dep.dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 		dep.srcAccessMask = 0x20000-1;
 		dep.dstAccessMask = 0x20000-1;
 		dep.srcSubpass = 0;

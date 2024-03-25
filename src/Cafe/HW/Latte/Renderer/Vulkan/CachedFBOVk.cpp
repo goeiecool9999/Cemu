@@ -212,12 +212,6 @@ std::vector<LatteTextureVk*> CachedFBOVk::GetFeedbackLoopedTextures() const
 {
 	if(!HasFeedbackLoop())
 		return {};
-	std::vector<LatteTextureVk*> loopbackedTextures;
-	for(size_t i = 0 ; i < maxColorBuffer; i++)
-	{
-		if(colorBuffer[i].texture)
-			loopbackedTextures.emplace_back(static_cast<LatteTextureVk*>(colorBuffer[i].texture->baseTexture));
-	}
 	if(m_feedbackLoopDepth)
 		cemu_assert_unimplemented();
 
@@ -259,9 +253,30 @@ void CachedFBOVk::UpdateFeedbackLoop(VkDescriptorSetInfo* vsDS, VkDescriptorSetI
 	  }
 	};
 
+	loopbackedTextures = {};
 	checkDescriptorSetCollision(vsDS);
 	checkDescriptorSetCollision(gsDS);
 	checkDescriptorSetCollision(psDS);
+
+
+	if(HasFeedbackLoop())
+	{
+		if(vsDS)
+			for(auto const & v : vsDS->list_referencedViews)
+				vectorAppendUnique(loopbackedTextures, static_cast<LatteTextureVk*>(v->baseTexture));
+		if(gsDS)
+			for(auto const & v : gsDS->list_referencedViews)
+				vectorAppendUnique(loopbackedTextures, static_cast<LatteTextureVk*>(v->baseTexture));
+		if(psDS)
+			for(auto const & v : psDS->list_referencedViews)
+				vectorAppendUnique(loopbackedTextures, static_cast<LatteTextureVk*>(v->baseTexture));
+
+		for(size_t i = 0 ; i < maxColorBuffer; i++)
+		{
+			if(colorBuffer[i].texture)
+				vectorAppendUnique(loopbackedTextures, static_cast<LatteTextureVk*>(colorBuffer[i].texture->baseTexture));
+		}
+	}
 
 	return;
 }

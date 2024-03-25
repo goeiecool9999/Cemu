@@ -1224,7 +1224,7 @@ void VulkanRenderer::draw_setRenderPass()
 
 
 	bool triggerBarrier = GetConfig().vk_accurate_barriers || m_state.activePipelineInfo->neverSkipAccurateBarrier;
-	if (triggerBarrier && fboVk->HasFeedbackLoop())
+	if (triggerBarrier && fboVk->HasFeedbackLoop() && !endPassNecessary)
 	{
 		VkMemoryBarrier memoryBarrier{};
 		memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -1561,6 +1561,8 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 		std::copy_if(dsInfo->descriptorWrites.begin(), dsInfo->descriptorWrites.end(), std::back_inserter(imageWrites), [](const VkWriteDescriptorSet& w){
 			return w.pImageInfo;
 		});
+		if(imageWrites.empty())
+			return;
 
 		for(auto& texture : dsInfo->textureArray)
 		{
