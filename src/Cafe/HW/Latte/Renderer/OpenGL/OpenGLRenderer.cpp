@@ -615,7 +615,7 @@ void OpenGLRenderer::renderTarget_setViewport(float x, float y, float width, flo
 	{
 		if (*(uint32*)&farZ == 0x3f7fffff)
 			*(uint32*)&farZ = 0x3f800000;
-		if (glDepthRangedNV)
+		if (false)
 			glDepthRangedNV(nearZ, farZ);
 		else
 			glDepthRange(nearZ, farZ);
@@ -678,6 +678,8 @@ void OpenGLRenderer::rendertarget_deleteCachedFBO(LatteCachedFBO* cfbo)
 	glDeleteFramebuffers(1, &cfboGL->glId_fbo);
 }
 
+extern MPTR g_renderdoc_textureAddress;
+extern bool g_renderdoc_discardCapture;
 // set active FBO
 void OpenGLRenderer::rendertarget_bindFramebufferObject(LatteCachedFBO* cfbo)
 {
@@ -694,6 +696,18 @@ void OpenGLRenderer::rendertarget_bindFramebufferObject(LatteCachedFBO* cfbo)
 	{
 		glBindFramebuffer(GL_FRAMEBUFFER_EXT, fboid);
 		prevBoundFBO = fboid;
+	}
+
+	if(cfbo)
+	{
+		for (auto& j : cfbo->colorBuffer)
+		{
+			if (j.texture && j.texture->baseTexture->physAddress == g_renderdoc_textureAddress)
+			{
+				g_renderdoc_discardCapture = false;
+				fmt::println("rendering to problematic texture, do not discard");
+			}
+		}
 	}
 }
 

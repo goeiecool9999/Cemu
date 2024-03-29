@@ -35,11 +35,6 @@
 #define VK_API_VERSION_MINOR(version) (((uint32_t)(version) >> 12) & 0x3FFU)
 #endif
 
-#include <renderdoc_app.h>
-#include <dlfcn.h>
-RENDERDOC_API_1_1_2 *rdoc_api;
-bool discardCapture = true;
-
 extern std::atomic_int g_compiling_pipelines;
 
 const  std::vector<const char*> kOptionalDeviceExtensions =
@@ -2711,46 +2706,6 @@ void VulkanRenderer::SwapBuffer(bool mainWindow)
 	// wait on command buffer semaphore
 	presentInfo.waitSemaphoreCount = 1;
 	presentInfo.pWaitSemaphores = &presentSemaphore;
-
-
-	if(!rdoc_api)
-	{
-		std::cout << "loading renderdoc now" << std::endl;
-		if (void* mod = dlopen("librenderdoc.so", RTLD_NOW))
-		{
-			std::cout << "really renderdoc now" << std::endl;
-			pRENDERDOC_GetAPI RENDERDOC_GetAPI = (pRENDERDOC_GetAPI) dlsym(mod, "RENDERDOC_GetAPI");
-			int ret = RENDERDOC_GetAPI(eRENDERDOC_API_Version_1_1_2, (void**) &rdoc_api);
-			assert(ret == 1);
-		}
-	}
-
-	if(rdoc_api)
-	{
-		if(rdoc_api->IsFrameCapturing())
-		{
-			if (discardCapture)
-			{
-				std::cout << fmt::format("discarding {}", mainWindow) << std::endl;
-				rdoc_api->DiscardFrameCapture(RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE(m_instance),
-											  (void*) gui_getWindowInfo().canvas_main.xlib_window);
-			}
-			else
-			{
-				std::cout << fmt::format("ending {}", mainWindow) << std::endl;
-				rdoc_api->EndFrameCapture(RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE(m_instance),
-										  (void*) gui_getWindowInfo().canvas_main.xlib_window);
-			}
-		}
-		if(!rdoc_api->IsFrameCapturing())
-		{
-			std::cout << fmt::format("starting {}", mainWindow) << std::endl;
-			rdoc_api->StartFrameCapture(RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE(m_instance), (void*)gui_getWindowInfo().canvas_main.xlib_window);
-			if(mainWindow)
-				discardCapture = true;
-		}
-
-	}
 
 	VkResult result = vkQueuePresentKHR(m_presentQueue, &presentInfo);
 	if (result < 0 && result != VK_ERROR_OUT_OF_DATE_KHR)

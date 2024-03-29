@@ -1330,9 +1330,12 @@ void LatteTexture_MarkConnectedTexturesForReloadFromDynamicTextures(LatteTexture
 			it->baseTexture->reloadFromDynamicTextures = true;
 	}
 }
-
+extern MPTR g_renderdoc_textureAddress;
+extern bool g_renderdoc_discardCapture;
 void LatteTexture_TrackTextureGPUWrite(LatteTexture* texture, uint32 slice, uint32 mip, uint64 eventCounter)
 {
+	if(texture->physAddress == g_renderdoc_textureAddress)
+		g_renderdoc_discardCapture = false;
 	LatteTexture_MarkDynamicTextureAsChanged(texture->baseView, slice, mip, eventCounter);
 	LatteTC_ResetTextureChangeTracker(texture);
 	texture->isUpdatedOnGPU = true;

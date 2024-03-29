@@ -6,8 +6,13 @@
 
 #include "Cafe/HW/Latte/Renderer/Renderer.h"
 
+extern MPTR g_renderdoc_textureAddress;
+extern bool g_renderdoc_discardCapture;
 void LatteSurfaceCopy_copySurfaceNew(MPTR srcPhysAddr, MPTR srcMipAddr, uint32 srcSwizzle, Latte::E_GX2SURFFMT srcSurfaceFormat, sint32 srcWidth, sint32 srcHeight, sint32 srcDepth, uint32 srcPitch, sint32 srcSlice, Latte::E_DIM srcDim, Latte::E_HWTILEMODE srcTilemode, sint32 srcAA, sint32 srcLevel, MPTR dstPhysAddr, MPTR dstMipAddr, uint32 dstSwizzle, Latte::E_GX2SURFFMT dstSurfaceFormat, sint32 dstWidth, sint32 dstHeight, sint32 dstDepth, uint32 dstPitch, sint32 dstSlice, Latte::E_DIM dstDim, Latte::E_HWTILEMODE dstTilemode, sint32 dstAA, sint32 dstLevel)
 {
+	if(srcPhysAddr == g_renderdoc_textureAddress || dstPhysAddr == g_renderdoc_textureAddress)
+		g_renderdoc_discardCapture = false;
+
 	// check if source is within valid mip range
 	if (srcDim == Latte::E_DIM::DIM_3D && (srcDepth >> srcLevel) == 0 && (srcWidth >> srcLevel) == 0 && (srcHeight >> srcLevel) == 0)
 		return;

@@ -17,6 +17,12 @@
 #include "input/InputManager.h"
 #include "Cafe/OS/libs/swkbd/swkbd.h"
 
+#include <renderdoc_app.h>
+#include <dlfcn.h>
+RENDERDOC_API_1_1_2 *rdoc_api;
+bool g_renderdoc_discardCapture = true;
+MPTR g_renderdoc_textureAddress = 0x459dd000;
+
 uint32 prevScissorX = 0;
 uint32 prevScissorY = 0;
 uint32 prevScissorWidth = 0;
@@ -698,6 +704,44 @@ void LatteRenderTarget_itHLESwapScanBuffer()
 	LattePerformanceMonitor_frameEnd();
 	LatteGPUState.frameCounter++;
 	g_renderer->SwapBuffers(true, true);
+
+//	goto endrenderdoc;
+	if(!rdoc_api)
+	{
+		std::cout << "loading renderdoc now" << std::endl;
+		if (void* mod = dlopen("librenderdoc.so", RTLD_NOW))
+		{
+			std::cout << "really renderdoc now" << std::endl;
+			pRENDERDOC_GetAPI RENDERDOC_GetAPI = (pRENDERDOC_GetAPI) dlsym(mod, "RENDERDOC_GetAPI");
+			int ret = RENDERDOC_GetAPI(eRENDERDOC_API_Version_1_1_2, (void**) &rdoc_api);
+			assert(ret == 1);
+		}
+	}
+
+	if(rdoc_api)
+	{
+		if(rdoc_api->IsFrameCapturing())
+		{
+			if (g_renderdoc_discardCapture)
+			{
+				fmt::println("discarding");
+				rdoc_api->DiscardFrameCapture(nullptr, (void*) gui_getWindowInfo().canvas_main.xlib_window);
+			}
+			else
+			{
+				fmt::println("ending");
+				rdoc_api->EndFrameCapture(nullptr, (void*) gui_getWindowInfo().canvas_main.xlib_window);
+			}
+		}
+		if(!rdoc_api->IsFrameCapturing())
+		{
+			fmt::println("starting");
+			rdoc_api->StartFrameCapture(nullptr, (void*)gui_getWindowInfo().canvas_main.xlib_window);
+			g_renderdoc_discardCapture = true;
+		}
+
+	}
+	endrenderdoc:
 
 	catchOpenGLError();
 	performanceMonitor.gpuTime_frameTime.beginMeasuring();

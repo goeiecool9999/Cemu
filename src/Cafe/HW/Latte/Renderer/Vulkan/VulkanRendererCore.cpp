@@ -13,10 +13,6 @@
 #include "Cafe/GameProfile/GameProfile.h"
 #include "util/helpers/helpers.h"
 
-#include <renderdoc_app.h>
-extern RENDERDOC_API_1_1_2 *rdoc_api;
-extern bool discardCapture;
-
 extern bool hasValidFramebufferAttached;
 
 // includes only states that may change during minimal drawcalls
@@ -1194,14 +1190,6 @@ bool s_syncOnNextDraw = false;
 void VulkanRenderer::draw_setRenderPass()
 {
 	CachedFBOVk* fboVk = m_state.activeFBO;
-
-	for(auto& j : fboVk->colorBuffer) {
-		if (j.texture && j.texture->baseTexture->physAddress == 0xa9500800)
-		{
-			discardCapture = false;
-			std::cout << ("rendering to terrain normal map, do not discard") << std::endl;
-		}
-	}
 
 	// update self-dependency flag
 	if (m_state.descriptorSetsChanged || m_state.activeRenderpassFBO != fboVk)
