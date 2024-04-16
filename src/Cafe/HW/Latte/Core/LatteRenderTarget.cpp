@@ -346,7 +346,7 @@ uint8 LatteMRT::GetActiveColorBufferMask(const LatteDecompilerShader* pixelShade
 		return 0;
 	cemu_assert_debug(colorControlReg.get_DEGAMMA_ENABLE() == false); // not supported
 	// combine color buffer mask with pixel output mask from pixel shader
-	colorBufferMask &= pixelShader->pixelColorOutputMask;
+	colorBufferMask &= (pixelShader ? pixelShader->pixelColorOutputMask : 0);
 	// combine color buffer mask with color channel mask from mmCB_TARGET_MASK (disable render buffer if all colors are blocked)
 	uint32 channelTargetMask = lcr.CB_TARGET_MASK.get_MASK();
 	for (uint32 i = 0; i < 8; i++)
@@ -919,11 +919,6 @@ void LatteRenderTarget_getScreenImageArea(sint32* x, sint32* y, sint32* width, s
 
 void LatteRenderTarget_copyToBackbuffer(LatteTextureView* textureView, bool isPadView)
 {
-	if (g_renderer->GetType() == RendererAPI::Vulkan)
-	{
-		((VulkanRenderer*)g_renderer.get())->PreparePresentationFrame(!isPadView);
-	}
-
 	// make sure texture is updated to latest data in cache
 	LatteTexture_UpdateDataToLatest(textureView->baseTexture);
 	// mark source texture as still in use
