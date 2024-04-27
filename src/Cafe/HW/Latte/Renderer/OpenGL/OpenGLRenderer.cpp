@@ -253,6 +253,27 @@ EGLAPI EGLBoolean EGLAPIENTRY eglSwapInterval(EGLDisplay dpy, EGLint interval)
 {
 	return EGL_TRUE;
 }
+#include <dlfcn.h>
+extern "C"
+EGLAPI EGLBoolean EGLAPIENTRY eglInitialize(EGLDisplay dpy, EGLint* major, EGLint* minor)
+{
+	static EGLBoolean (*realEglInit)(EGLDisplay, EGLint *, EGLint *) = nullptr;
+	static std::once_flag f;
+	std::call_once(f, [&] {
+		auto libEGL = dlopen("libEGL.so", RTLD_NOW | RTLD_NODELETE);
+		realEglInit = (EGLBoolean(*)(EGLDisplay, EGLint*,EGLint*))dlsym(libEGL, "eglInitialize");
+		dlclose(libEGL);
+	});
+	if (!realEglInit)
+		cemu_assert(false);
+
+	EGLBoolean returnValue = realEglInit(dpy, major, minor);
+	*major = 1;
+	*minor = 5;
+
+	return returnValue;
+}
+
 #endif
 
 #elif BOOST_OS_MACOS
