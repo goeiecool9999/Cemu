@@ -28,6 +28,14 @@ jobs:
       run: |
         cd dependencies/vcpkg
         git fetch --unshallow
+        git checkout cbf4a664
+        git fetch origin pull/38979/head
+        git config --global user.name "GitHub Runner fixup action script"
+        git config --global user.email "not-a-real-email@example.com"
+        git cherry-pick -Xtheirs 855a293b 951af818
+        updated_commit=`git rev-parse HEAD`
+        cd ../..
+        sed -i "s/cbf4a6641528cee6f172328984576f51698de726/$updated_commit/g" vcpkg.json
 
     - name: Setup release mode parameters (for deploy)
       if: ${{ inputs.deploymode == 'release' }}
@@ -137,7 +145,15 @@ jobs:
       run: |
         cd dependencies/vcpkg
         git fetch --unshallow
-        
+        git checkout cbf4a664
+        git fetch origin pull/38979/head
+        git config --global user.name "GitHub Runner fixup action script"
+        git config --global user.email "not-a-real-email@example.com"
+        git cherry-pick -Xtheirs 855a293b 951af818
+        $updated_commit = git rev-parse HEAD
+        cd ../..
+        sed -i "s/cbf4a6641528cee6f172328984576f51698de726/$updated_commit/g" vcpkg.json
+
     - name: Setup release mode parameters (for deploy)
       if: ${{ inputs.deploymode == 'release' }}
       run: |
@@ -216,7 +232,15 @@ jobs:
       run: |
         cd dependencies/vcpkg
         git fetch --unshallow
-        
+        git checkout cbf4a664
+        git fetch origin pull/38979/head
+        git config --global user.name "GitHub Runner fixup action script"
+        git config --global user.email "not-a-real-email@example.com"
+        git cherry-pick -Xtheirs 855a293b 951af818
+        updated_commit=`git rev-parse HEAD`
+        cd ../..
+        sed -i '' "s/cbf4a6641528cee6f172328984576f51698de726/$updated_commit/g" vcpkg.json
+
     - name: Setup release mode parameters (for deploy)
       if: ${{ inputs.deploymode == 'release' }}
       run: |
