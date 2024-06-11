@@ -92,6 +92,90 @@ jobs:
         name: cemu-bin-linux-x64
         path: ./bin/Cemu
 
+  build-android:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: "Checkout repo"
+        uses: actions/checkout@v3
+        with:
+          submodules: "recursive"
+          fetch-depth: 0
+
+      - uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+
+      - name: "Fetch full history for vcpkg submodule"
+        run: |
+          cd dependencies/vcpkg
+          git fetch --unshallow
+          git pull --all
+
+      - name: Setup release mode parameters (for deploy)
+        if: ${{ inputs.deploymode == 'release' }}
+        run: |
+          echo "BUILD_MODE=release" >> $GITHUB_ENV
+          echo "BUILD_FLAGS=" >> $GITHUB_ENV
+          echo "Build mode is release"
+
+      - name: Setup debug mode parameters (for continous build)
+        if: ${{ inputs.deploymode != 'release' }}
+        run: |
+          echo "BUILD_MODE=debug" >> $GITHUB_ENV
+          echo "BUILD_FLAGS=" >> $GITHUB_ENV
+          echo "Build mode is debug"
+
+      - name: Setup version for experimental
+        if: ${{ inputs.experimentalversion != '' }}
+        run: |
+          echo "[INFO] Experimental version ${{ inputs.experimentalversion }}"
+          echo "BUILD_FLAGS=${{ env.BUILD_FLAGS }} -DEXPERIMENTAL_VERSION=${{ inputs.experimentalversion }}" >> $GITHUB_ENV
+
+      - name: "Install system dependencies"
+        run: |
+          sudo apt update -qq
+          sudo apt install -y clang-15 cmake freeglut3-dev libgcrypt20-dev libglm-dev libgtk-3-dev libpulse-dev libsecret-1-dev libsystemd-dev libudev-dev nasm ninja-build
+
+      - name: "Bootstrap vcpkg"
+        run: |
+          bash ./dependencies/vcpkg/bootstrap-vcpkg.sh
+
+      - name: 'Setup NuGet Credentials for vcpkg'
+        shell: 'bash'
+        run: |
+          mono `./dependencies/vcpkg/vcpkg fetch nuget | tail -n 1` \
+          sources add \
+          -source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+          -storepasswordincleartext \
+          -name "GitHub" \
+          -username "${{ github.repository_owner }}" \
+          -password "${{ secrets.GITHUB_TOKEN }}"
+          mono `./dependencies/vcpkg/vcpkg fetch nuget | tail -n 1` \
+          setapikey "${{ secrets.GITHUB_TOKEN }}" \
+          -source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          build-scan-publish: true
+          build-scan-terms-of-use-url: "https://gradle.com/terms-of-service"
+          build-scan-terms-of-use-agree: "yes"
+
+      - name: 'Build android app'
+        run: |
+          cd src/android
+          ./gradlew build
+
+#      - name: Prepare artifact
+#        if: ${{ inputs.deploymode == 'release' }}
+#        run: mv bin/Cemu_release bin/Cemu
+#
+#      - name: Upload artifact
+#        uses: actions/upload-artifact@v3
+#        if: ${{ inputs.deploymode == 'release' }}
+#        with:
+#          name: cemu-bin-linux-x64
+#          path: ./bin/Cemu
   build-appimage:
     runs-on: ubuntu-22.04
     needs: build-ubuntu
