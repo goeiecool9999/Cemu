@@ -103,5 +103,5 @@ jobs:
         uses: actions/upload-artifact@v3
         if: ${{ inputs.deploymode == 'release' }}
         with:
-          name: cemu-bin-anroid-aarch64
+          name: cemu-bin-android-aarch64
           path: ./bin/Cemu.apk
