@@ -110,9 +110,10 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r26d
+#      - name: Setup Android NDK
+#        uses: nttld/setup-ndk@v1
+#        with:
+#          ndk-version: r26d
 
       - name: "Fetch full history for vcpkg submodule"
         run: |
