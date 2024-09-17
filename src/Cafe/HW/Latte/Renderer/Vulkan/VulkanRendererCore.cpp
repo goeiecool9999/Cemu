@@ -1215,26 +1215,11 @@ void VulkanRenderer::draw_setRenderPass()
 	auto vkObjRenderPass = fboVk->GetRenderPassObj();
 	auto vkObjFramebuffer = fboVk->GetFramebufferObj();
 
-	const bool canSkipSync = m_featureControl.deviceExtensions.attachment_feedback_loop_layout;
 	const bool layoutUpdatesRequired = !noLongerSelfReferencing.empty() || !newSelfReferencingTextures.empty();
 
-	const bool endPassNecessary = fboVk->HasFeedbackLoop() && !canSkipSync && (GetConfig().vk_accurate_barriers || m_state.activePipelineInfo->neverSkipAccurateBarrier)
+	const bool endPassNecessary = fboVk->HasFeedbackLoop() && (GetConfig().vk_accurate_barriers || m_state.activePipelineInfo->neverSkipAccurateBarrier)
 							  || layoutUpdatesRequired
 		                      || (m_state.hasRenderSelfDependency != fboVk->HasFeedbackLoop());
-
-
-	bool triggerBarrier = GetConfig().vk_accurate_barriers || m_state.activePipelineInfo->neverSkipAccurateBarrier;
-	if (triggerBarrier && fboVk->HasFeedbackLoop() && !endPassNecessary)
-	{
-		VkMemoryBarrier memoryBarrier{};
-		memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-		VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-		VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-		memoryBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-		memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		vkCmdPipelineBarrier(m_state.currentCommandBuffer, srcStage, dstStage, VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
-		performanceMonitor.vk.numDrawBarriersPerFrame.increment();
-	}
 
 
 	if (!endPassNecessary && m_state.activeRenderpassFBO == fboVk)
