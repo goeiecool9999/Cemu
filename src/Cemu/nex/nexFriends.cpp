@@ -1,6 +1,7 @@
 #include "prudp.h"
 #include "nex.h"
 #include "nexFriends.h"
+#include "Cafe/CafeSystem.h"
 
 static const int NOTIFICATION_SRV_FRIEND_OFFLINE = 0x0A; // the opposite event (friend online) is notified via _PRESENCE_CHANGE
 static const int NOTIFICATION_SRV_FRIEND_PRESENCE_CHANGE = 0x18;
@@ -220,7 +221,8 @@ NexFriends::NexFriends(uint32 authServerIp, uint16 authServerPort, const char* a
 
 NexFriends::~NexFriends()
 {
-	nexCon->destroy();
+	if(nexCon)
+		nexCon->destroy();
 }
 
 void NexFriends::doAsyncLogin()
@@ -275,7 +277,8 @@ void NexFriends::handleResponse_getAllInformation(nexServiceResponse_t* response
 	}
 	NexFriends* session = (NexFriends*)nexFriends;
 	session->myPreference = nexPrincipalPreference(&response->data);
-	nexComment comment(&response->data);
+	auto comment = nexComment(&response->data);
+	session->myComment = comment;
 	if (response->data.hasReadOutOfBounds())
 		return;
 	// acquire lock on lists
@@ -387,6 +390,28 @@ bool NexFriends::updatePreferencesAsync(nexPrincipalPreference newPreferences, s
 void NexFriends::getMyPreference(nexPrincipalPreference& preference)
 {
 	preference = myPreference;
+}
+
+bool NexFriends::updateCommentAsync(nexComment newComment, std::function<void(RpcErrorCode)> cb)
+{
+	uint8 tempNexBufferArray[1024];
+	nexPacketBuffer packetBuffer(tempNexBufferArray, sizeof(tempNexBufferArray), true);
+	newComment.writeData(&packetBuffer);
+	nexCon->callMethod(
+		NEX_PROTOCOL_FRIENDS_WIIU, 15, &packetBuffer, [this, cb, newComment](nexServiceResponse_t* response) -> void {
+			if (!response->isSuccessful)
+				return cb(NexFriends::ERR_RPC_FAILED);
+			this->myComment = newComment;
+			return cb(NexFriends::ERR_NONE);
+		},
+		true);
+	// TEST
+	return true;
+}
+
+void NexFriends::getMyComment(nexComment& comment)
+{
+	comment = myComment;
 }
 
 bool NexFriends::addProvisionalFriendByPidGuessed(uint32 principalId)
@@ -912,6 +937,18 @@ void NexFriends::markFriendRequestsAsReceived(uint64* messageIdList, sint32 coun
 void NexFriends::updateMyPresence(nexPresenceV2& myPresence)
 {
 	this->myPresence = myPresence;
+
+	if (GetTitleIdHigh(CafeSystem::GetForegroundTitleId()) == 0x00050000)
+	{
+		myPresence.gameKey.titleId = CafeSystem::GetForegroundTitleId();
+		myPresence.gameKey.ukn = CafeSystem::GetForegroundTitleVersion();
+	}
+	else
+	{
+		myPresence.gameKey.titleId = 0; // icon will not be ??? or invalid to others
+		myPresence.gameKey.ukn = 0;
+	}
+
 	if (nexCon == nullptr || nexCon->getState() != nexService::STATE_CONNECTED)
 	{
 		// not connected

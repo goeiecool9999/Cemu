@@ -280,6 +280,10 @@ GraphicPack2::GraphicPack2(fs::path rulesPath, IniParser& rules)
 		m_enabled = m_default_enabled;
 	}
 
+	auto option_allowRendertargetSizeOptimization = rules.FindOption("colorbufferOptimizationAware");
+	if (option_allowRendertargetSizeOptimization)
+		m_allowRendertargetSizeOptimization = boost::iequals(*option_allowRendertargetSizeOptimization, "true") || boost::iequals(*option_allowRendertargetSizeOptimization, "1");
+
 	auto option_vendorFilter = rules.FindOption("vendorFilter");
 	if (option_vendorFilter)
 	{
@@ -826,7 +830,7 @@ void GraphicPack2::_iterateReplacedFiles(const fs::path& currentPath, bool isAOC
 			{
 				virtualMountPath = fs::path("vol/content/") / virtualMountPath;
 			}
-			fscDeviceRedirect_add(virtualMountPath.generic_string(), it.path().generic_string(), m_fs_priority);
+			fscDeviceRedirect_add(virtualMountPath.generic_string(), it.file_size(), it.path().generic_string(), m_fs_priority);
 		}		
 	}
 }

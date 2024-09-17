@@ -267,14 +267,15 @@ LatteTextureView* LatteMRT::GetColorAttachmentTexture(uint32 index, bool createN
 
 	// colorbuffer width/height has to be padded to 8/32 alignment but the actual resolution might be smaller
 	// use the scissor box as a clue to figure out the original resolution if possible
-#if 0
-	uint32 scissorBoxWidth = LatteGPUState.contextNew.PA_SC_GENERIC_SCISSOR_BR.get_BR_X();
-	uint32 scissorBoxHeight = LatteGPUState.contextNew.PA_SC_GENERIC_SCISSOR_BR.get_BR_Y();
-	if (((scissorBoxWidth + 7) & ~7) == colorBufferWidth)
-		colorBufferWidth = scissorBoxWidth;
-	if (((colorBufferHeight + 31) & ~31) == colorBufferHeight)
-		colorBufferHeight = scissorBoxHeight;
-#endif
+	if(LatteGPUState.allowFramebufferSizeOptimization)
+	{
+		uint32 scissorBoxWidth = LatteGPUState.contextNew.PA_SC_GENERIC_SCISSOR_BR.get_BR_X();
+		uint32 scissorBoxHeight = LatteGPUState.contextNew.PA_SC_GENERIC_SCISSOR_BR.get_BR_Y();
+		if (((scissorBoxWidth + 7) & ~7) == colorBufferWidth)
+			colorBufferWidth = scissorBoxWidth;
+		if (((colorBufferHeight + 31) & ~31) == colorBufferHeight)
+			colorBufferHeight = scissorBoxHeight;
+	}
 
 	// log resolution changes if the above heuristic takes effect
 	// this is useful to find resolutions which need to be updated in gfx pack texture rules
@@ -303,7 +304,7 @@ LatteTextureView* LatteMRT::GetColorAttachmentTexture(uint32 index, bool createN
 	if (colorBufferView == nullptr)
 	{
 		// create color buffer view
-		colorBufferView = LatteTexture_CreateMapping(colorBufferPhysMem, 0, colorBufferWidth, colorBufferHeight, (viewFirstSlice + viewNumSlices), colorBufferPitch, colorBufferTileMode, colorBufferSwizzle>>8, viewFirstMip, 1, viewFirstSlice, viewNumSlices, (Latte::E_GX2SURFFMT)colorBufferFormat, (viewFirstSlice + viewNumSlices)>1? Latte::E_DIM::DIM_2D_ARRAY: Latte::E_DIM::DIM_2D, Latte::E_DIM::DIM_2D, false);
+		colorBufferView = LatteTexture_CreateMapping(colorBufferPhysMem, 0, colorBufferWidth, colorBufferHeight, (viewFirstSlice + viewNumSlices), colorBufferPitch, colorBufferTileMode, colorBufferSwizzle>>8, viewFirstMip, 1, viewFirstSlice, viewNumSlices, (Latte::E_GX2SURFFMT)colorBufferFormat, (viewFirstSlice + viewNumSlices)>1? Latte::E_DIM::DIM_2D_ARRAY: Latte::E_DIM::DIM_2D, Latte::E_DIM::DIM_2D, false, true);
 		LatteGPUState.repeatTextureInitialization = true;
 		checkForTextureChanges = false;
 	}
@@ -339,7 +340,7 @@ uint8 LatteMRT::GetActiveColorBufferMask(const LatteDecompilerShader* pixelShade
 		return 0;
 	cemu_assert_debug(colorControlReg.get_DEGAMMA_ENABLE() == false); // not supported
 	// combine color buffer mask with pixel output mask from pixel shader
-	colorBufferMask &= pixelShader->pixelColorOutputMask;
+	colorBufferMask &= (pixelShader ? pixelShader->pixelColorOutputMask : 0);
 	// combine color buffer mask with color channel mask from mmCB_TARGET_MASK (disable render buffer if all colors are blocked)
 	uint32 channelTargetMask = lcr.CB_TARGET_MASK.get_MASK();
 	for (uint32 i = 0; i < 8; i++)
@@ -582,7 +583,7 @@ bool LatteMRT::UpdateCurrentFBO()
 				if (!depthBufferView)
 				{
 					// create new depth buffer view and if it doesn't exist then also create the texture
-					depthBufferView = LatteTexture_CreateMapping(depthBufferPhysMem, 0, depthBufferWidth, depthBufferHeight, depthBufferViewFirstSlice+1, depthBufferPitch, depthBufferTileMode, depthBufferSwizzle, 0, 1, depthBufferViewFirstSlice, 1, depthBufferFormat, depthBufferViewFirstSlice > 0 ? Latte::E_DIM::DIM_2D_ARRAY : Latte::E_DIM::DIM_2D, Latte::E_DIM::DIM_2D, true);
+					depthBufferView = LatteTexture_CreateMapping(depthBufferPhysMem, 0, depthBufferWidth, depthBufferHeight, depthBufferViewFirstSlice+1, depthBufferPitch, depthBufferTileMode, depthBufferSwizzle, 0, 1, depthBufferViewFirstSlice, 1, depthBufferFormat, depthBufferViewFirstSlice > 0 ? Latte::E_DIM::DIM_2D_ARRAY : Latte::E_DIM::DIM_2D, Latte::E_DIM::DIM_2D, true, true);
 					LatteGPUState.repeatTextureInitialization = true;
 				}
 				else
@@ -874,11 +875,6 @@ void LatteRenderTarget_getScreenImageArea(sint32* x, sint32* y, sint32* width, s
 
 void LatteRenderTarget_copyToBackbuffer(LatteTextureView* textureView, bool isPadView)
 {
-	if (g_renderer->GetType() == RendererAPI::Vulkan)
-	{
-		((VulkanRenderer*)g_renderer.get())->PreparePresentationFrame(!isPadView);
-	}
-
 	// make sure texture is updated to latest data in cache
 	LatteTexture_UpdateDataToLatest(textureView->baseTexture);
 	// mark source texture as still in use

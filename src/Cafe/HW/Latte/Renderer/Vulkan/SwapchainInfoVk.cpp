@@ -155,6 +155,8 @@ void SwapchainInfoVk::Create()
 
 	m_acquireIndex = 0;
 	hasDefinedSwapchainImage = false;
+
+	m_queueDepth = 0;
 }
 
 void SwapchainInfoVk::Cleanup()
@@ -221,15 +223,20 @@ VkSemaphore SwapchainInfoVk::ConsumeAcquireSemaphore()
 	return ret;
 }
 
-bool SwapchainInfoVk::AcquireImage(uint64 timeout)
+bool SwapchainInfoVk::AcquireImage()
 {
-	WaitAvailableFence();
 	ResetAvailableFence();
 
 	VkSemaphore acquireSemaphore = m_acquireSemaphores[m_acquireIndex];
-	VkResult result = vkAcquireNextImageKHR(m_logicalDevice, m_swapchain, timeout, acquireSemaphore, m_imageAvailableFence, &swapchainImageIndex);
+	VkResult result = vkAcquireNextImageKHR(m_logicalDevice, m_swapchain, 1'000'000'000, acquireSemaphore, m_imageAvailableFence, &swapchainImageIndex);
 	if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
 		m_shouldRecreate = true;
+	if (result == VK_TIMEOUT)
+	{
+		swapchainImageIndex = -1;
+		return false;
+	}
+
 	if (result < 0)
 	{
 		swapchainImageIndex = -1;
@@ -342,6 +349,7 @@ VkExtent2D SwapchainInfoVk::ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& cap
 
 VkPresentModeKHR SwapchainInfoVk::ChoosePresentMode(const std::vector<VkPresentModeKHR>& modes)
 {
+	m_maxQueued = 0;
 	const auto vsyncState = (VSync)GetConfig().vsync.GetValue();
 	if (vsyncState == VSync::MAILBOX)
 	{
@@ -368,6 +376,7 @@ VkPresentModeKHR SwapchainInfoVk::ChoosePresentMode(const std::vector<VkPresentM
 		return VK_PRESENT_MODE_FIFO_KHR;
 	}
 
+	m_maxQueued = 1;
 	return VK_PRESENT_MODE_FIFO_KHR;
 }
 

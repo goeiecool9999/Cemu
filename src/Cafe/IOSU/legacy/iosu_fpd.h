@@ -94,7 +94,7 @@ namespace iosu
 					/* +0x1EC */ uint8 isOnline;
 					/* +0x1ED */ uint8 _padding1ED[3];
 					// some other sub struct?
-					/* +0x1F0 */ char comment[36]; // pops up every few seconds in friend list
+					/* +0x1F0 */ CafeWideString<0x12> comment; // pops up every few seconds in friend list
 					/* +0x214 */ uint32be _padding214;
 					/* +0x218 */ FPDDate approvalTime;
 					/* +0x220 */ FPDDate lastOnline;
@@ -212,6 +212,7 @@ namespace iosu
 		static const int RELATIONSHIP_FRIEND = 3;
 
 		static const int GAMEMODE_MAX_MESSAGE_LENGTH = 0x80; // limit includes null-terminator character, so only 0x7F actual characters can be used
+		static const int MY_COMMENT_LENGTH = 0x12;
 
 		enum class FPD_REQUEST_ID
 		{
@@ -245,6 +246,7 @@ namespace iosu
 			CheckSettingStatusAsync = 0x7596,
 			GetFriendListEx = 0x75F9,
 			GetFriendRequestListEx = 0x76C1,
+			UpdateCommentAsync = 0x7726,
 			UpdatePreferenceAsync = 0x7727,
 			RemoveFriendAsync = 0x7789,
 			DeleteFriendFlagsAsync = 0x778A,
