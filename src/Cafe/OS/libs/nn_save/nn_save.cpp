@@ -118,11 +118,11 @@ namespace save
 		return false;
 	}
 
-	SAVEStatus GetAbsoluteFullPathOtherApplication(uint32 persistentId, uint64 titleId, const char* subDir, char* outPath)
+	FS_RESULT GetAbsoluteFullPathOtherApplication(uint32 persistentId, uint64 titleId, const char* subDir, char* outPath)
 	{
 		uint32be applicationBox;
 		if(acp::ACPGetApplicationBox(&applicationBox, titleId) != acp::ACPStatus::SUCCESS)
-			return (FSStatus)FS_RESULT::NOT_FOUND;
+			return FS_RESULT::NOT_FOUND;
 
 		sint32 written = 0;
 		if(applicationBox == 3)	
@@ -151,48 +151,69 @@ namespace save
 			cemu_assert_unimplemented();
 		}
 		else 
-			return (FSStatus)FS_RESULT::NOT_FOUND;
+			return FS_RESULT::NOT_FOUND;
 
 		if (written < SAVE_MAX_PATH_SIZE - 1)
-			return (FSStatus)FS_RESULT::SUCCESS;
+			return FS_RESULT::SUCCESS;
 
 		cemu_assert_suspicious();
-		return (FSStatus)(FS_RESULT::FATAL_ERROR);
+		return FS_RESULT::FATAL_ERROR;
 	}
 
-	typedef struct
+	struct AsyncResultData
 	{
-		coreinit::OSEvent* event;
-		SAVEStatus returnStatus;
+		MEMPTR<coreinit::OSEvent> event;
+		betype<SAVEStatus> returnStatus;
+	};
 
-		MEMPTR<OSThread_t> thread; // own stuff until cond + event rewritten
-	} AsyncCallbackParam_t;
+	void SaveAsyncFinishCallback(PPCInterpreter_t* hCPU);
 
-	void AsyncCallback(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 returnStatus, void* p)
+	struct AsyncToSyncWrapper : public FSAsyncParams
 	{
-		cemu_assert_debug(p && ((AsyncCallbackParam_t*)p)->event);
+		AsyncToSyncWrapper()
+		{
+			coreinit::OSInitEvent(&_event, coreinit::OSEvent::EVENT_STATE::STATE_NOT_SIGNALED, coreinit::OSEvent::EVENT_MODE::MODE_AUTO);
+			ioMsgQueue = nullptr;
+			userContext = &_result;
+			userCallback = RPLLoader_MakePPCCallable(SaveAsyncFinishCallback);
+			_result.returnStatus = 0;
+			_result.event = &_event;
+		}
 
-		AsyncCallbackParam_t* param = (AsyncCallbackParam_t*)p;
-		param->returnStatus = returnStatus;
-		coreinit::OSSignalEvent(param->event);
-	}
+		~AsyncToSyncWrapper()
+		{
 
-	void AsyncCallback(PPCInterpreter_t* hCPU)
+		}
+
+		FSAsyncParams* GetAsyncParams()
+		{
+			return this;
+		}
+
+		SAVEStatus GetResult()
+		{
+			return _result.returnStatus;
+		}
+
+		void WaitForEvent()
+		{
+			coreinit::OSWaitEvent(&_event);
+		}
+	  private:
+		coreinit::OSEvent _event;
+		AsyncResultData _result;
+	};
+
+	void SaveAsyncFinishCallback(PPCInterpreter_t* hCPU)
 	{
 		ppcDefineParamMEMPTR(client, coreinit::FSClient_t, 0);
 		ppcDefineParamMEMPTR(block, coreinit::FSCmdBlock_t, 1);
 		ppcDefineParamU32(returnStatus, 2);
 		ppcDefineParamMEMPTR(userContext, void, 3);
 
-		MEMPTR<AsyncCallbackParam_t> param{ userContext };
-
-		// wait till thread is actually suspended
-		OSThread_t* thread = param->thread.GetPtr();
-		while (thread->suspendCounter == 0 || thread->state == OSThread_t::THREAD_STATE::STATE_RUNNING)
-			coreinit::OSYieldThread();
-
-		param->returnStatus = returnStatus;
-		coreinit_resumeThread(param->thread.GetPtr(), 1000);
+		MEMPTR<AsyncResultData> resultPtr{ userContext };
+		resultPtr->returnStatus = returnStatus;
+		coreinit::OSSignalEvent(resultPtr->event);
 
 		osLib_returnFromFunction(hCPU, 0);
 	}
@@ -320,347 +341,6 @@ namespace save
 		return SAVE_STATUS_OK;
 	}
 
-	SAVEStatus SAVERemoveAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
-	{
-		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
-
-		OSLockMutex(&g_nn_save->mutex);
-
-		uint32 persistentId;
-		if (GetPersistentIdEx(accountSlot, &persistentId))
-		{
-			char fullPath[SAVE_MAX_PATH_SIZE];
-			if (GetAbsoluteFullPath(persistentId, path, fullPath))
-				result = coreinit::FSRemoveAsync(client, block, (uint8*)fullPath, errHandling, (FSAsyncParamsNew_t*)asyncParams);
-		}
-		else
-			result = (FSStatus)FS_RESULT::NOT_FOUND;
-
-		OSUnlockMutex(&g_nn_save->mutex);
-		return result;
-	}
-
-	SAVEStatus SAVEMakeDirAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
-	{
-		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
-
-		OSLockMutex(&g_nn_save->mutex);
-
-		uint32 persistentId;
-		if (GetPersistentIdEx(accountSlot, &persistentId))
-		{
-			char fullPath[SAVE_MAX_PATH_SIZE];
-			if (GetAbsoluteFullPath(persistentId, path, fullPath))
-				result = coreinit::FSMakeDirAsync(client, block, fullPath, errHandling, (FSAsyncParamsNew_t*)asyncParams);
-		}
-		else
-			result = (FSStatus)FS_RESULT::NOT_FOUND;
-
-		OSUnlockMutex(&g_nn_save->mutex);
-
-		return result;
-	}
-
-	SAVEStatus SAVEOpenDirAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FSDirHandlePtr hDir, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
-	{
-		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
-
-		OSLockMutex(&g_nn_save->mutex);
-
-		uint32 persistentId;
-		if (GetPersistentIdEx(accountSlot, &persistentId))
-		{
-			char fullPath[SAVE_MAX_PATH_SIZE];
-			if (GetAbsoluteFullPath(persistentId, path, fullPath))
-				result = coreinit::FSOpenDirAsync(client, block, fullPath, hDir, errHandling, (FSAsyncParamsNew_t*)asyncParams);
-			
-		}
-		else
-			result = (FSStatus)FS_RESULT::NOT_FOUND;
-
-		OSUnlockMutex(&g_nn_save->mutex);
-
-		return result;
-	}
-
-	SAVEStatus SAVEOpenFileAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path,  const char* mode, FSFileHandleDepr_t* hFile, FS_ERROR_MASK errHandling, const FSAsyncParamsNew_t* asyncParams)
-	{
-		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
-
-		OSLockMutex(&g_nn_save->mutex);
-
-		uint32 persistentId;
-		if (GetPersistentIdEx(accountSlot, &persistentId))
-		{
-			char fullPath[SAVE_MAX_PATH_SIZE];
-			if (GetAbsoluteFullPath(persistentId, path, fullPath))
-				result = coreinit::FSOpenFileAsync(client, block, fullPath, (char*)mode, hFile, errHandling, (FSAsyncParamsNew_t*)asyncParams);
-		}
-		else
-			result = (FSStatus)FS_RESULT::NOT_FOUND;
-
-		OSUnlockMutex(&g_nn_save->mutex);
-
-		return result;
-	}
-
-	SAVEStatus SAVEOpenFileOtherApplicationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint64 titleId, uint8 accountSlot, const char* path, const char* mode, FSFileHandleDepr_t* hFile, FS_ERROR_MASK errHandling, const FSAsyncParamsNew_t* asyncParams)
-	{
-		if (strcmp(mode, "r") != 0)
-			return (SAVEStatus)(FS_RESULT::PERMISSION_ERROR);
-
-		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
-
-		OSLockMutex(&g_nn_save->mutex);
-
-		uint32 persistentId;
-		if (GetPersistentIdEx(accountSlot, &persistentId))
-		{
-			char fullPath[SAVE_MAX_PATH_SIZE];
-			if (GetAbsoluteFullPathOtherApplication(persistentId, titleId, path, fullPath))
-				result = coreinit::FSOpenFileAsync(client, block, fullPath, (char*)mode, hFile, errHandling, (FSAsyncParamsNew_t*)asyncParams);
-		}
-		else
-			result = (FSStatus)FS_RESULT::NOT_FOUND;
-
-		OSUnlockMutex(&g_nn_save->mutex);
-
-		return result;
-	}
-
-	void export_SAVEOpenFileOtherApplicationAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU64(titleId, 2);
-		ppcDefineParamU8(accountSlot, 4);
-		ppcDefineParamMEMPTR(path, const char, 5);
-		ppcDefineParamMEMPTR(mode, const char, 6);
-		ppcDefineParamMEMPTR(hFile, FSFileHandleDepr_t, 7);
-		ppcDefineParamU32(errHandling, 8);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParamsNew_t, 9);
-
-		const SAVEStatus result = SAVEOpenFileOtherApplicationAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), titleId, accountSlot, path.GetPtr(), mode.GetPtr(), hFile.GetPtr(), errHandling, asyncParams.GetPtr());
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVEOpenFileOtherApplication(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint64 titleId, uint8 accountSlot, const char* path, const char* mode, FSFileHandleDepr_t* hFile, FS_ERROR_MASK errHandling)
-	{
-		MEMPTR<OSThread_t> currentThread{coreinit::OSGetCurrentThread()};
-		FSAsyncParamsNew_t asyncParams;
-		asyncParams.ioMsgQueue = nullptr;
-		asyncParams.userCallback = PPCInterpreter_makeCallableExportDepr(AsyncCallback);
-
-		StackAllocator<AsyncCallbackParam_t> param;
-		param->thread = currentThread;
-		param->returnStatus = (FSStatus)FS_RESULT::SUCCESS;
-		asyncParams.userContext = param.GetPointer();
-
-		SAVEStatus status = SAVEOpenFileOtherApplicationAsync(client, block, titleId, accountSlot, path, mode, hFile, errHandling, &asyncParams);
-		if (status == (FSStatus)FS_RESULT::SUCCESS)
-		{
-			coreinit_suspendThread(currentThread, 1000);
-			PPCCore_switchToScheduler();
-			return param->returnStatus;
-		}
-
-		return status;
-	}
-
-	void export_SAVEOpenFileOtherApplication(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU64(titleId, 2);
-		ppcDefineParamU8(accountSlot, 4);
-		ppcDefineParamMEMPTR(path, const char, 5);
-		ppcDefineParamMEMPTR(mode, const char, 6);
-		ppcDefineParamMEMPTR(hFile, FSFileHandleDepr_t, 7);
-		ppcDefineParamU32(errHandling, 8);
-
-		const SAVEStatus result = SAVEOpenFileOtherApplication(fsClient.GetPtr(), fsCmdBlock.GetPtr(), titleId, accountSlot, path.GetPtr(), mode.GetPtr(), hFile.GetPtr(), errHandling);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVEOpenFileOtherNormalApplicationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 accountSlot, const char* path, const char* mode, FSFileHandleDepr_t* hFile, FS_ERROR_MASK errHandling, const FSAsyncParamsNew_t* asyncParams)
-	{
-		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID(uniqueId);
-		return SAVEOpenFileOtherApplicationAsync(client, block, titleId, accountSlot, path, mode, hFile, errHandling, asyncParams);
-	}
-
-	void export_SAVEOpenFileOtherNormalApplicationAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU32(uniqueId, 2);
-		ppcDefineParamU8(accountSlot, 3);
-		ppcDefineParamMEMPTR(path, const char, 4);
-		ppcDefineParamMEMPTR(mode, const char, 5);
-		ppcDefineParamMEMPTR(hFile, FSFileHandleDepr_t, 6);
-		ppcDefineParamU32(errHandling, 7);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParamsNew_t, 8);
-
-		const SAVEStatus result = SAVEOpenFileOtherNormalApplicationAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), uniqueId, accountSlot, path.GetPtr(), mode.GetPtr(), hFile.GetPtr(), errHandling, asyncParams.GetPtr());
-		osLib_returnFromFunction(hCPU, result);
-	}
-	SAVEStatus SAVEOpenFileOtherNormalApplication(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 accountSlot, const char* path, const char* mode, FSFileHandleDepr_t* hFile, FS_ERROR_MASK errHandling)
-	{
-		//peterBreak();
-
-		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID(uniqueId);
-		return SAVEOpenFileOtherApplication(client, block, titleId, accountSlot, path, mode, hFile, errHandling);
-	}
-
-	void export_SAVEOpenFileOtherNormalApplication(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU32(uniqueId, 2);
-		ppcDefineParamU8(accountSlot, 3);
-		ppcDefineParamMEMPTR(path, const char, 4);
-		ppcDefineParamMEMPTR(mode, const char, 5);
-		ppcDefineParamMEMPTR(hFile, FSFileHandleDepr_t, 6);
-		ppcDefineParamU32(errHandling, 7);
-
-		const SAVEStatus result = SAVEOpenFileOtherNormalApplication(fsClient.GetPtr(), fsCmdBlock.GetPtr(), uniqueId, accountSlot, path.GetPtr(), mode.GetPtr(), hFile.GetPtr(), errHandling);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVEOpenFileOtherNormalApplicationVariationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 variation, uint8 accountSlot, const char* path, const char* mode, FSFileHandleDepr_t* hFile, FS_ERROR_MASK errHandling, const FSAsyncParamsNew_t* asyncParams)
-	{
-		//peterBreak();
-
-		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID_VARIATION(uniqueId, variation);
-		return SAVEOpenFileOtherApplicationAsync(client, block, titleId, accountSlot, path, mode, hFile, errHandling, asyncParams);
-	}
-
-	void export_SAVEOpenFileOtherNormalApplicationVariationAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU32(uniqueId, 2);
-		ppcDefineParamU8(variation, 3);
-		ppcDefineParamU8(accountSlot, 4);
-		ppcDefineParamMEMPTR(path, const char, 5);
-		ppcDefineParamMEMPTR(mode, const char, 6);
-		ppcDefineParamMEMPTR(hFile, FSFileHandleDepr_t, 7);
-		ppcDefineParamU32(errHandling, 8);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParamsNew_t, 9);
-
-		const SAVEStatus result = SAVEOpenFileOtherNormalApplicationVariationAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), uniqueId, variation, accountSlot, path.GetPtr(), mode.GetPtr(), hFile.GetPtr(), errHandling, asyncParams.GetPtr());
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVEOpenFileOtherNormalApplicationVariation(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 variation, uint8 accountSlot, const char* path, const char* mode, FSFileHandleDepr_t* hFile, FS_ERROR_MASK errHandling)
-	{
-		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID_VARIATION(uniqueId, variation);
-		return SAVEOpenFileOtherApplication(client, block, titleId, accountSlot, path, mode, hFile, errHandling);
-	}
-
-	void export_SAVEOpenFileOtherNormalApplicationVariation(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU32(uniqueId, 2);
-		ppcDefineParamU8(variation, 3);
-		ppcDefineParamU8(accountSlot, 4);
-		ppcDefineParamMEMPTR(path, const char, 5);
-		ppcDefineParamMEMPTR(mode, const char, 6);
-		ppcDefineParamMEMPTR(hFile, FSFileHandleDepr_t, 7);
-		ppcDefineParamU32(errHandling, 8);
-
-		const SAVEStatus result = SAVEOpenFileOtherNormalApplicationVariation(fsClient.GetPtr(), fsCmdBlock.GetPtr(), uniqueId, variation, accountSlot, path.GetPtr(), mode.GetPtr(), hFile.GetPtr(), errHandling);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVEGetFreeSpaceSizeAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, FSLargeSize* freeSize, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
-	{
-		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
-
-		OSLockMutex(&g_nn_save->mutex);
-
-		uint32 persistentId;
-		if (GetPersistentIdEx(accountSlot, &persistentId))
-		{
-			char fullPath[SAVE_MAX_PATH_SIZE];
-			// usually a pointer with '\0' instead of nullptr, but it's basically the same
-			if (GetAbsoluteFullPath(persistentId, nullptr, fullPath))
-				result = coreinit::FSGetFreeSpaceSizeAsync(client, block, fullPath, freeSize, errHandling, (FSAsyncParamsNew_t*)asyncParams);
-		}
-		else
-			result = (FSStatus)FS_RESULT::NOT_FOUND;
-
-		OSUnlockMutex(&g_nn_save->mutex);
-
-		return result;
-	}
-
-	SAVEStatus SAVEGetStatAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
-	{
-		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
-
-		OSLockMutex(&g_nn_save->mutex);
-
-		uint32 persistentId;
-		if (GetPersistentIdEx(accountSlot, &persistentId))
-		{
-			char fullPath[SAVE_MAX_PATH_SIZE];
-			if (GetAbsoluteFullPath(persistentId, path, fullPath))
-				result = coreinit::__FSQueryInfoAsync(client, block, (uint8*)fullPath, FSA_QUERY_TYPE_STAT, stat, errHandling, (FSAsyncParamsNew_t*)asyncParams); // FSGetStatAsync(...)
-		}
-		else
-			result = (FSStatus)FS_RESULT::NOT_FOUND;
-
-		OSUnlockMutex(&g_nn_save->mutex);
-
-		return result;
-	}
-
-	SAVEStatus SAVEGetStatOtherApplicationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint64 titleId, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
-	{
-		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
-
-		OSLockMutex(&g_nn_save->mutex);
-
-		uint32 persistentId;
-		if (GetPersistentIdEx(accountSlot, &persistentId))
-		{
-			char fullPath[SAVE_MAX_PATH_SIZE];
-			if (GetAbsoluteFullPathOtherApplication(persistentId, titleId, path, fullPath) == (FSStatus)FS_RESULT::SUCCESS)
-				result = coreinit::__FSQueryInfoAsync(client, block, (uint8*)fullPath, FSA_QUERY_TYPE_STAT, stat, errHandling, (FSAsyncParamsNew_t*)asyncParams); // FSGetStatAsync(...)
-		}
-		else
-			result = (FSStatus)FS_RESULT::NOT_FOUND;
-
-		OSUnlockMutex(&g_nn_save->mutex);
-
-		return result;
-	}
-
-	SAVEStatus SAVEGetStatOtherNormalApplicationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
-	{
-		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID(uniqueId);
-		return SAVEGetStatOtherApplicationAsync(client, block, titleId, accountSlot, path, stat, errHandling, asyncParams);
-	}
-
-	SAVEStatus SAVEGetStatOtherDemoApplicationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
-	{
-		uint64 titleId = SAVE_UNIQUE_DEMO_TO_TITLE_ID(uniqueId);
-		return SAVEGetStatOtherApplicationAsync(client, block, titleId, accountSlot, path, stat, errHandling, asyncParams);
-	}
-
-	SAVEStatus SAVEGetStatOtherNormalApplicationVariationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 variation, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
-	{
-		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID_VARIATION(uniqueId, variation);
-		return SAVEGetStatOtherApplicationAsync(client, block, titleId, accountSlot, path, stat, errHandling, asyncParams);
-	}
-
-	SAVEStatus SAVEGetStatOtherDemoApplicationVariationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 variation, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
-	{
-		uint64 titleId = SAVE_UNIQUE_DEMO_TO_TITLE_ID_VARIATION(uniqueId, variation);
-		return SAVEGetStatOtherApplicationAsync(client, block, titleId, accountSlot, path, stat, errHandling, asyncParams);
-	}
-
 	SAVEStatus SAVEInitSaveDir(uint8 accountSlot)
 	{
 		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
@@ -679,112 +359,7 @@ namespace save
 		return result;
 	}
 
-	SAVEStatus SAVEGetFreeSpaceSize(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, FSLargeSize* freeSize, FS_ERROR_MASK errHandling)
-	{
-		MEMPTR<OSThread_t> currentThread{coreinit::OSGetCurrentThread()};
-		FSAsyncParams_t asyncParams;
-		asyncParams.ioMsgQueue = MPTR_NULL;
-		asyncParams.userCallback = _swapEndianU32(PPCInterpreter_makeCallableExportDepr(AsyncCallback));
-
-		StackAllocator<AsyncCallbackParam_t> param;
-		param->thread = currentThread;
-		param->returnStatus = (FSStatus)FS_RESULT::SUCCESS;
-		asyncParams.userContext = param.GetMPTRBE();
-
-		SAVEStatus status = SAVEGetFreeSpaceSizeAsync(client, block, accountSlot, freeSize, errHandling, &asyncParams);
-		if (status == (FSStatus)FS_RESULT::SUCCESS)
-		{
-			coreinit_suspendThread(currentThread, 1000);
-			PPCCore_switchToScheduler();
-			return param->returnStatus;
-		}
-
-		return status;
-	}
-
-	void export_SAVEGetFreeSpaceSize(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(returnedFreeSize, FSLargeSize, 3);
-		ppcDefineParamU32(errHandling, 4);
-
-		const SAVEStatus result = SAVEGetFreeSpaceSize(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, returnedFreeSize.GetPtr(), errHandling);
-		cemuLog_log(LogType::Save, "SAVEGetFreeSpaceSize(0x{:08x}, 0x{:08x}, {:x}, {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	void export_SAVEGetFreeSpaceSizeAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(returnedFreeSize, FSLargeSize, 3);
-		ppcDefineParamU32(errHandling, 4);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParams_t, 5);
-
-		const SAVEStatus result = SAVEGetFreeSpaceSizeAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, returnedFreeSize.GetPtr(), errHandling, asyncParams.GetPtr());
-		cemuLog_log(LogType::Save, "SAVEGetFreeSpaceSizeAsync(0x{:08x}, 0x{:08x}, {:x}, {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	void export_SAVEInit(PPCInterpreter_t* hCPU)
-	{
-		const SAVEStatus result = SAVEInit();
-		cemuLog_log(LogType::Save, "SAVEInit() -> {:x}", result);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	void export_SAVERemoveAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(path, const char, 3);
-		ppcDefineParamU32(errHandling, 4);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParams_t, 5);
-
-		const SAVEStatus result = SAVERemoveAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, path.GetPtr(), errHandling, asyncParams.GetPtr());
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVERemove(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FS_ERROR_MASK errHandling)
-	{
-		MEMPTR<OSThread_t> currentThread{coreinit::OSGetCurrentThread()};
-		FSAsyncParams_t asyncParams;
-		asyncParams.ioMsgQueue = MPTR_NULL;
-		asyncParams.userCallback = _swapEndianU32(PPCInterpreter_makeCallableExportDepr(AsyncCallback));
-
-		StackAllocator<AsyncCallbackParam_t> param;
-		param->thread = currentThread;
-		param->returnStatus = (FSStatus)FS_RESULT::SUCCESS;
-		asyncParams.userContext = param.GetMPTRBE();
-
-		SAVEStatus status = SAVERemoveAsync(client, block, accountSlot, path, errHandling, &asyncParams);
-		if (status == (FSStatus)FS_RESULT::SUCCESS)
-		{
-			coreinit_suspendThread(currentThread, 1000);
-			PPCCore_switchToScheduler();
-			return param->returnStatus;
-		}
-
-		return status;
-	}
-
-	void export_SAVERemove(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(path, const char, 3);
-		ppcDefineParamU32(errHandling, 4);
-
-		const SAVEStatus result = SAVERemove(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, path.GetPtr(), errHandling);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVERenameAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* oldPath, const char* newPath, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
+	SAVEStatus SAVEOpenDirAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FSDirHandlePtr hDir, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
 	{
 		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
 
@@ -793,13 +368,10 @@ namespace save
 		uint32 persistentId;
 		if (GetPersistentIdEx(accountSlot, &persistentId))
 		{
-			char fullOldPath[SAVE_MAX_PATH_SIZE];
-			if (GetAbsoluteFullPath(persistentId, oldPath, fullOldPath))
-			{
-				char fullNewPath[SAVE_MAX_PATH_SIZE];
-				if (GetAbsoluteFullPath(persistentId, newPath, fullNewPath))
-					result = coreinit::FSRenameAsync(client, block, fullOldPath, fullNewPath, errHandling, (FSAsyncParamsNew_t*)asyncParams);
-			}
+			char fullPath[SAVE_MAX_PATH_SIZE];
+			if (GetAbsoluteFullPath(persistentId, path, fullPath))
+				result = coreinit::FSOpenDirAsync(client, block, fullPath, hDir, errHandling, (FSAsyncParams*)asyncParams);
+			
 		}
 		else
 			result = (FSStatus)FS_RESULT::NOT_FOUND;
@@ -807,101 +379,19 @@ namespace save
 		OSUnlockMutex(&g_nn_save->mutex);
 
 		return result;
-	}
-
-	void export_SAVERenameAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(oldPath, const char, 3);
-		ppcDefineParamMEMPTR(newPath, const char, 4);
-		ppcDefineParamU32(errHandling, 5);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParams_t, 6);
-
-		const SAVEStatus result = SAVERenameAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, oldPath.GetPtr(), newPath.GetPtr(), errHandling, asyncParams.GetPtr());
-		cemuLog_log(LogType::Save, "SAVERenameAsync(0x{:08x}, 0x{:08x}, {:x}, {}, {}, {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, oldPath.GetPtr(), newPath.GetPtr(), errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVERename(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* oldPath, const char* newPath, FS_ERROR_MASK errHandling)
-	{
-		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
-
-		OSLockMutex(&g_nn_save->mutex);
-		uint32 persistentId;
-		if (GetPersistentIdEx(accountSlot, &persistentId))
-		{
-			char fullOldPath[SAVE_MAX_PATH_SIZE];
-			if (GetAbsoluteFullPath(persistentId, oldPath, fullOldPath))
-			{
-				char fullNewPath[SAVE_MAX_PATH_SIZE];
-				if (GetAbsoluteFullPath(persistentId, newPath, fullNewPath))
-					result = coreinit::FSRename(client, block, fullOldPath, fullNewPath, errHandling);
-			}
-		}
-		else
-			result = (FSStatus)FS_RESULT::NOT_FOUND;
-		OSUnlockMutex(&g_nn_save->mutex);
-
-		return result;
-	}
-
-	void export_SAVEOpenDirAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(path, const char, 3);
-		ppcDefineParamMEMPTR(hDir, betype<FSDirHandle2>, 4);
-		ppcDefineParamU32(errHandling, 5);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParams_t, 6);
-
-		const SAVEStatus result = SAVEOpenDirAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, path.GetPtr(), hDir, errHandling, asyncParams.GetPtr());
-		cemuLog_log(LogType::Save, "SAVEOpenDirAsync(0x{:08x}, 0x{:08x}, {:x}, {}, 0x{:08x} ({:x}), {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, path.GetPtr(), hDir.GetMPTR(),
-			(hDir.GetPtr() == nullptr ? 0 : (uint32)*hDir.GetPtr()), errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
 	}
 
 	SAVEStatus SAVEOpenDir(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FSDirHandlePtr hDir, FS_ERROR_MASK errHandling)
 	{
-		MEMPTR<OSThread_t> currentThread{coreinit::OSGetCurrentThread()};
-		FSAsyncParams_t asyncParams;
-		asyncParams.ioMsgQueue = MPTR_NULL;
-		asyncParams.userCallback = _swapEndianU32(PPCInterpreter_makeCallableExportDepr(AsyncCallback));
-
-		StackAllocator<AsyncCallbackParam_t> param;
-		param->thread = currentThread;
-		param->returnStatus = (FSStatus)FS_RESULT::SUCCESS;
-		asyncParams.userContext = param.GetMPTRBE();
-
-		SAVEStatus status = SAVEOpenDirAsync(client, block, accountSlot, path, hDir, errHandling, &asyncParams);
-		if (status == (FSStatus)FS_RESULT::SUCCESS)
-		{
-			coreinit_suspendThread(currentThread, 1000);
-			PPCCore_switchToScheduler();
-			return param->returnStatus;
-		}
-
-		return status;
+		StackAllocator<AsyncToSyncWrapper> asyncData;
+		SAVEStatus status = SAVEOpenDirAsync(client, block, accountSlot, path, hDir, errHandling, asyncData->GetAsyncParams());
+		if (status != (FSStatus)FS_RESULT::SUCCESS)
+			return status;
+		asyncData->WaitForEvent();
+		return asyncData->GetResult();
 	}
 
-	void export_SAVEOpenDir(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(path, const char, 3);
-		ppcDefineParamMEMPTR(hDir, betype<FSDirHandle2>, 4);
-		ppcDefineParamU32(errHandling, 5);
-
-		const SAVEStatus result = SAVEOpenDir(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, path.GetPtr(), hDir, errHandling);
-		cemuLog_log(LogType::Save, "SAVEOpenDir(0x{:08x}, 0x{:08x}, {:x}, {}, 0x{:08x} ({:x}), {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, path.GetPtr(), hDir.GetMPTR(),
-			(hDir.GetPtr() == nullptr ? 0 : (uint32)*hDir.GetPtr()), errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVEOpenDirOtherApplicationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint64 titleId, uint8 accountSlot, const char* path, FSDirHandlePtr hDir, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
+	SAVEStatus SAVEOpenDirOtherApplicationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint64 titleId, uint8 accountSlot, const char* path, FSDirHandlePtr hDir, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
 	{
 		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
 
@@ -910,8 +400,8 @@ namespace save
 		if (GetPersistentIdEx(accountSlot, &persistentId))
 		{
 			char fullPath[SAVE_MAX_PATH_SIZE];
-			if (GetAbsoluteFullPathOtherApplication(persistentId, titleId, path, fullPath))
-				result = coreinit::FSOpenDirAsync(client, block, fullPath, hDir, errHandling, (FSAsyncParamsNew_t*)asyncParams);
+			if (GetAbsoluteFullPathOtherApplication(persistentId, titleId, path, fullPath) == FS_RESULT::SUCCESS)
+				result = coreinit::FSOpenDirAsync(client, block, fullPath, hDir, errHandling, (FSAsyncParams*)asyncParams);
 		}
 		else
 			result = (FSStatus)FS_RESULT::NOT_FOUND;
@@ -920,81 +410,20 @@ namespace save
 		return result;
 	}
 
-	void export_SAVEOpenDirOtherApplicationAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU64(titleId, 2);
-		ppcDefineParamU8(accountSlot, 3);
-		ppcDefineParamMEMPTR(path, const char, 4);
-		ppcDefineParamMEMPTR(hDir, betype<FSDirHandle2>, 5);
-		ppcDefineParamU32(errHandling, 6);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParams_t, 7);
-
-		const SAVEStatus result = SAVEOpenDirOtherApplicationAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), titleId, accountSlot, path.GetPtr(), hDir, errHandling, asyncParams.GetPtr());
-		cemuLog_log(LogType::Save, "SAVEOpenDirOtherApplicationAsync(0x{:08x}, 0x{:08x}, {:x}, {:x}, {}, 0x{:08x} ({:x}), {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), titleId, accountSlot, path.GetPtr(), hDir.GetMPTR(),
-			(hDir.GetPtr() == nullptr ? 0 : (uint32)*hDir.GetPtr()), errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
 	SAVEStatus SAVEOpenDirOtherApplication(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint64 titleId, uint8 accountSlot, const char* path, FSDirHandlePtr hDir, FS_ERROR_MASK errHandling)
 	{
-		MEMPTR<OSThread_t> currentThread{coreinit::OSGetCurrentThread()};
-		FSAsyncParams_t asyncParams;
-		asyncParams.ioMsgQueue = MPTR_NULL;
-		asyncParams.userCallback = _swapEndianU32(PPCInterpreter_makeCallableExportDepr(AsyncCallback));
-
-		StackAllocator<AsyncCallbackParam_t> param;
-		param->thread = currentThread;
-		param->returnStatus = (FSStatus)FS_RESULT::SUCCESS;
-		asyncParams.userContext = param.GetMPTRBE();
-
-		SAVEStatus status = SAVEOpenDirOtherApplicationAsync(client, block, titleId, accountSlot, path, hDir, errHandling, &asyncParams);
-		if (status == (FSStatus)FS_RESULT::SUCCESS)
-		{
-			coreinit_suspendThread(currentThread, 1000);
-			PPCCore_switchToScheduler();
-			return param->returnStatus;
-		}
-
-		return status;
+		StackAllocator<AsyncToSyncWrapper> asyncData;
+		SAVEStatus status = SAVEOpenDirOtherApplicationAsync(client, block, titleId, accountSlot, path, hDir, errHandling, asyncData->GetAsyncParams());
+		if (status != (FSStatus)FS_RESULT::SUCCESS)
+			return status;
+		asyncData->WaitForEvent();
+		return asyncData->GetResult();
 	}
 
-	void export_SAVEOpenDirOtherApplication(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU64(titleId, 2);
-		ppcDefineParamU8(accountSlot, 3);
-		ppcDefineParamMEMPTR(path, const char, 4);
-		ppcDefineParamMEMPTR(hDir, betype<FSDirHandle2>, 5);
-		ppcDefineParamU32(errHandling, 6);
-
-		const SAVEStatus result = SAVEOpenDirOtherApplication(fsClient.GetPtr(), fsCmdBlock.GetPtr(), titleId, accountSlot, path.GetPtr(), hDir, errHandling);
-		cemuLog_log(LogType::Save, "SAVEOpenDirOtherApplication(0x{:08x}, 0x{:08x}, {:x}, {:x}, {}, 0x{:08x} ({:x}), {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), titleId, accountSlot, path.GetPtr(), hDir.GetMPTR(),
-			(hDir.GetPtr() == nullptr ? 0 : (uint32)*hDir.GetPtr()), errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVEOpenDirOtherNormalApplicationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 accountSlot, const char* path, FSDirHandlePtr hDir, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
+	SAVEStatus SAVEOpenDirOtherNormalApplicationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 accountSlot, const char* path, FSDirHandlePtr hDir, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
 	{
 		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID(uniqueId);
 		return SAVEOpenDirOtherApplicationAsync(client, block, titleId, accountSlot, path, hDir, errHandling, asyncParams);
-	}
-
-	void export_SAVEOpenDirOtherNormalApplicationAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU32(uniqueId, 2);
-		ppcDefineParamU8(accountSlot, 3);
-		ppcDefineParamMEMPTR(path, const char, 4);
-		ppcDefineParamMEMPTR(hDir, betype<FSDirHandle2>, 5);
-		ppcDefineParamU32(errHandling, 6);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParams_t, 7);
-
-		const SAVEStatus result = SAVEOpenDirOtherNormalApplicationAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), uniqueId, accountSlot, path.GetPtr(), hDir, errHandling, asyncParams.GetPtr());
-		osLib_returnFromFunction(hCPU, result);
 	}
 
 	SAVEStatus SAVEOpenDirOtherNormalApplication(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 accountSlot, const char* path, FSDirHandlePtr hDir, FS_ERROR_MASK errHandling)
@@ -1003,40 +432,10 @@ namespace save
 		return SAVEOpenDirOtherApplication(client, block, titleId, accountSlot, path, hDir, errHandling);
 	}
 
-	void export_SAVEOpenDirOtherNormalApplication(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU32(uniqueId, 2);
-		ppcDefineParamU8(accountSlot, 3);
-		ppcDefineParamMEMPTR(path, const char, 4);
-		ppcDefineParamMEMPTR(hDir, betype<FSDirHandle2>, 5);
-		ppcDefineParamU32(errHandling, 6);
-
-		const SAVEStatus result = SAVEOpenDirOtherNormalApplication(fsClient.GetPtr(), fsCmdBlock.GetPtr(), uniqueId, accountSlot, path.GetPtr(), hDir, errHandling);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVEOpenDirOtherNormalApplicationVariationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 variation, uint8 accountSlot, const char* path, FSDirHandlePtr hDir, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
+	SAVEStatus SAVEOpenDirOtherNormalApplicationVariationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 variation, uint8 accountSlot, const char* path, FSDirHandlePtr hDir, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
 	{
 		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID_VARIATION(uniqueId, variation);
 		return SAVEOpenDirOtherApplicationAsync(client, block, titleId, accountSlot, path, hDir, errHandling, asyncParams);
-	}
-
-	void export_SAVEOpenDirOtherNormalApplicationVariationAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU32(uniqueId, 2);
-		ppcDefineParamU8(variation, 3);
-		ppcDefineParamU8(accountSlot, 4);
-		ppcDefineParamMEMPTR(path, const char, 5);
-		ppcDefineParamMEMPTR(hDir, betype<FSDirHandle2>, 6);
-		ppcDefineParamU32(errHandling, 7);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParams_t, 8);
-
-		const SAVEStatus result = SAVEOpenDirOtherNormalApplicationVariationAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), uniqueId, variation, accountSlot, path.GetPtr(), hDir, errHandling, asyncParams.GetPtr());
-		osLib_returnFromFunction(hCPU, result);
 	}
 
 	SAVEStatus SAVEOpenDirOtherNormalApplicationVariation(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 variation, uint8 accountSlot, const char* path, FSDirHandlePtr hDir, FS_ERROR_MASK errHandling)
@@ -1045,291 +444,175 @@ namespace save
 		return SAVEOpenDirOtherApplication(client, block, titleId, accountSlot, path, hDir, errHandling);
 	}
 
-	void export_SAVEOpenDirOtherNormalApplicationVariation(PPCInterpreter_t* hCPU)
+	SAVEStatus SAVEOpenFileAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, const char* mode, FSFileHandlePtr outFileHandle, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
 	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU32(uniqueId, 2);
-		ppcDefineParamU8(variation, 3);
-		ppcDefineParamU8(accountSlot, 4);
-		ppcDefineParamMEMPTR(path, const char, 5);
-		ppcDefineParamMEMPTR(hDir, betype<FSDirHandle2>, 6);
-		ppcDefineParamU32(errHandling, 7);
+		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
 
-		const SAVEStatus result = SAVEOpenDirOtherNormalApplicationVariation(fsClient.GetPtr(), fsCmdBlock.GetPtr(), uniqueId, variation, accountSlot, path.GetPtr(), hDir, errHandling);
-		osLib_returnFromFunction(hCPU, result);
-	}
+		OSLockMutex(&g_nn_save->mutex);
 
-	void export_SAVEMakeDirAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(path, const char, 3);
-		ppcDefineParamU32(errHandling, 4);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParams_t, 5);
-
-		const SAVEStatus result = SAVEMakeDirAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, path.GetPtr(), errHandling, asyncParams.GetPtr());
-		cemuLog_log(LogType::Save, "SAVEMakeDirAsync(0x{:08x}, 0x{:08x}, {:x}, {},  {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, path.GetPtr(), errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVEMakeDir(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FS_ERROR_MASK errHandling)
-	{
-		MEMPTR<OSThread_t> currentThread{coreinit::OSGetCurrentThread()};
-		FSAsyncParams_t asyncParams;
-		asyncParams.ioMsgQueue = MPTR_NULL;
-		asyncParams.userCallback = _swapEndianU32(PPCInterpreter_makeCallableExportDepr(AsyncCallback));
-
-		StackAllocator<AsyncCallbackParam_t> param;
-		param->thread = currentThread;
-		param->returnStatus = (FSStatus)FS_RESULT::SUCCESS;
-		asyncParams.userContext = param.GetMPTRBE();
-
-		SAVEStatus status = SAVEMakeDirAsync(client, block, accountSlot, path, errHandling, &asyncParams);
-		if (status == (FSStatus)FS_RESULT::SUCCESS)
+		uint32 persistentId;
+		if (GetPersistentIdEx(accountSlot, &persistentId))
 		{
-			coreinit_suspendThread(currentThread, 1000);
-			PPCCore_switchToScheduler();
-			return param->returnStatus;
+			char fullPath[SAVE_MAX_PATH_SIZE];
+			if (GetAbsoluteFullPath(persistentId, path, fullPath))
+				result = coreinit::FSOpenFileAsync(client, block, fullPath, (char*)mode, outFileHandle, errHandling, (FSAsyncParams*)asyncParams);
 		}
+		else
+			result = (FSStatus)FS_RESULT::NOT_FOUND;
 
-		return status;
+		OSUnlockMutex(&g_nn_save->mutex);
+
+		return result;
 	}
 
-	void export_SAVEMakeDir(PPCInterpreter_t* hCPU)
+	SAVEStatus SAVEOpenFileOtherApplicationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint64 titleId, uint8 accountSlot, const char* path, const char* mode, FSFileHandlePtr outFileHandle, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
 	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(path, const char, 3);
-		ppcDefineParamU32(errHandling, 4);
+		if (strcmp(mode, "r") != 0)
+			return (SAVEStatus)(FS_RESULT::PERMISSION_ERROR);
 
-		const SAVEStatus result = SAVEMakeDir(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, path.GetPtr(), errHandling);
-		cemuLog_log(LogType::Save, "SAVEMakeDir(0x{:08x}, 0x{:08x}, {:x}, {},  {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, path.GetPtr(), errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
-	}
+		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
 
-	void export_SAVEOpenFileAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(path, const char, 3);
-		ppcDefineParamMEMPTR(mode, const char, 4);
-		ppcDefineParamMEMPTR(hFile, FSFileHandleDepr_t, 5);
-		ppcDefineParamU32(errHandling, 6);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParamsNew_t, 7);
+		OSLockMutex(&g_nn_save->mutex);
 
-		const SAVEStatus result = SAVEOpenFileAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, path.GetPtr(), mode.GetPtr(), hFile.GetPtr(), errHandling, asyncParams.GetPtr());
-		cemuLog_log(LogType::Save, "SAVEOpenFileAsync(0x{:08x}, 0x{:08x}, {:x}, {}, {}, 0x{:08x}, {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, path.GetPtr(), mode.GetPtr(), hFile.GetMPTR(), errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVEOpenFile(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, const char* mode, FSFileHandleDepr_t* hFile, FS_ERROR_MASK errHandling)
-	{
-		MEMPTR<OSThread_t> currentThread{coreinit::OSGetCurrentThread()};
-		FSAsyncParamsNew_t asyncParams;
-		asyncParams.ioMsgQueue = nullptr;
-		asyncParams.userCallback = PPCInterpreter_makeCallableExportDepr(AsyncCallback);
-
-		StackAllocator<AsyncCallbackParam_t> param;
-		param->thread = currentThread;
-		param->returnStatus = (FSStatus)FS_RESULT::SUCCESS;
-		asyncParams.userContext = param.GetPointer();
-
-		SAVEStatus status = SAVEOpenFileAsync(client, block, accountSlot, path, mode, hFile, errHandling, &asyncParams);
-		if (status == (FSStatus)FS_RESULT::SUCCESS)
+		uint32 persistentId;
+		if (GetPersistentIdEx(accountSlot, &persistentId))
 		{
-			coreinit_suspendThread(currentThread, 1000);
-			PPCCore_switchToScheduler();
-			return param->returnStatus;
+			char fullPath[SAVE_MAX_PATH_SIZE];
+			if (GetAbsoluteFullPathOtherApplication(persistentId, titleId, path, fullPath) == FS_RESULT::SUCCESS)
+				result = coreinit::FSOpenFileAsync(client, block, fullPath, (char*)mode, outFileHandle, errHandling, (FSAsyncParams*)asyncParams);
 		}
+		else
+			result = (FSStatus)FS_RESULT::NOT_FOUND;
 
-		return status;
+		OSUnlockMutex(&g_nn_save->mutex);
+
+		return result;
 	}
 
-	void export_SAVEOpenFile(PPCInterpreter_t* hCPU)
+	SAVEStatus SAVEOpenFileOtherApplication(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint64 titleId, uint8 accountSlot, const char* path, const char* mode, FSFileHandlePtr outFileHandle, FS_ERROR_MASK errHandling)
 	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(path, const char, 3);
-		ppcDefineParamMEMPTR(mode, const char, 4);
-		ppcDefineParamMEMPTR(hFile, FSFileHandleDepr_t, 5);
-		ppcDefineParamU32(errHandling, 6);
-
-		const SAVEStatus result = SAVEOpenFile(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, path.GetPtr(), mode.GetPtr(), hFile.GetPtr(), errHandling);
-		cemuLog_log(LogType::Save, "SAVEOpenFile(0x{:08x}, 0x{:08x}, {:x}, {}, {}, 0x{:08x}, {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, path.GetPtr(), mode.GetPtr(), hFile.GetMPTR(), errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
+		StackAllocator<AsyncToSyncWrapper> asyncData;
+		SAVEStatus status = SAVEOpenFileOtherApplicationAsync(client, block, titleId, accountSlot, path, mode, outFileHandle, errHandling, asyncData->GetAsyncParams());
+		if (status != (FSStatus)FS_RESULT::SUCCESS)
+			return status;
+		asyncData->WaitForEvent();
+		return asyncData->GetResult();
 	}
 
-	void export_SAVEInitSaveDir(PPCInterpreter_t* hCPU)
+	SAVEStatus SAVEOpenFileOtherNormalApplicationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 accountSlot, const char* path, const char* mode, FSFileHandlePtr outFileHandle, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
 	{
-		ppcDefineParamU8(accountSlot, 0);
-		const SAVEStatus result = SAVEInitSaveDir(accountSlot);
-		cemuLog_log(LogType::Save, "SAVEInitSaveDir({:x}) -> {:x}", accountSlot, result);
-		osLib_returnFromFunction(hCPU, result);
+		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID(uniqueId);
+		return SAVEOpenFileOtherApplicationAsync(client, block, titleId, accountSlot, path, mode, outFileHandle, errHandling, asyncParams);
 	}
 
-	void export_SAVEGetStatAsync(PPCInterpreter_t* hCPU)
+	SAVEStatus SAVEOpenFileOtherNormalApplication(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 accountSlot, const char* path, const char* mode, FSFileHandlePtr outFileHandle, FS_ERROR_MASK errHandling)
 	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(path, const char, 3);
-		ppcDefineParamMEMPTR(stat, FSStat_t, 4);
-		ppcDefineParamU32(errHandling, 5);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParams_t, 6);
+		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID(uniqueId);
+		return SAVEOpenFileOtherApplication(client, block, titleId, accountSlot, path, mode, outFileHandle, errHandling);
+	}
 
-		const SAVEStatus result = SAVEGetStatAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, path.GetPtr(), stat.GetPtr(), errHandling, asyncParams.GetPtr());
-		cemuLog_log(LogType::Save, "SAVEGetStatAsync(0x{:08x}, 0x{:08x}, {:x}, {}, 0x{:08x}, {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, path.GetPtr(), stat.GetMPTR(), errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
+	SAVEStatus SAVEOpenFileOtherNormalApplicationVariationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 variation, uint8 accountSlot, const char* path, const char* mode, FSFileHandlePtr outFileHandle, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
+	{
+		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID_VARIATION(uniqueId, variation);
+		return SAVEOpenFileOtherApplicationAsync(client, block, titleId, accountSlot, path, mode, outFileHandle, errHandling, asyncParams);
+	}
+
+	SAVEStatus SAVEOpenFileOtherNormalApplicationVariation(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 variation, uint8 accountSlot, const char* path, const char* mode, FSFileHandlePtr outFileHandle, FS_ERROR_MASK errHandling)
+	{
+		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID_VARIATION(uniqueId, variation);
+		return SAVEOpenFileOtherApplication(client, block, titleId, accountSlot, path, mode, outFileHandle, errHandling);
+	}
+
+	SAVEStatus SAVEGetStatAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
+	{
+		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
+
+		OSLockMutex(&g_nn_save->mutex);
+
+		uint32 persistentId;
+		if (GetPersistentIdEx(accountSlot, &persistentId))
+		{
+			char fullPath[SAVE_MAX_PATH_SIZE];
+			if (GetAbsoluteFullPath(persistentId, path, fullPath))
+				result = coreinit::__FSQueryInfoAsync(client, block, (uint8*)fullPath, FSA_QUERY_TYPE_STAT, stat, errHandling, (FSAsyncParams*)asyncParams); // FSGetStatAsync(...)
+		}
+		else
+			result = (FSStatus)FS_RESULT::NOT_FOUND;
+
+		OSUnlockMutex(&g_nn_save->mutex);
+
+		return result;
 	}
 
 	SAVEStatus SAVEGetStat(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling)
 	{
-		MEMPTR<OSThread_t> currentThread{coreinit::OSGetCurrentThread()};
-		FSAsyncParams_t asyncParams;
-		asyncParams.ioMsgQueue = MPTR_NULL;
-		asyncParams.userCallback = _swapEndianU32(PPCInterpreter_makeCallableExportDepr(AsyncCallback));
+		StackAllocator<AsyncToSyncWrapper> asyncData;
+		SAVEStatus status = SAVEGetStatAsync(client, block, accountSlot, path, stat, errHandling, asyncData->GetAsyncParams());
+		if (status != (FSStatus)FS_RESULT::SUCCESS)
+			return status;
+		asyncData->WaitForEvent();
+		return asyncData->GetResult();
+	}
 
-		StackAllocator<AsyncCallbackParam_t> param;
-		param->thread = currentThread;
-		param->returnStatus = (FSStatus)FS_RESULT::SUCCESS;
-		asyncParams.userContext = param.GetMPTRBE();
+	SAVEStatus SAVEGetStatOtherApplicationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint64 titleId, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
+	{
+		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
 
-		SAVEStatus status = SAVEGetStatAsync(client, block, accountSlot, path, stat, errHandling, &asyncParams);
-		if (status == (FSStatus)FS_RESULT::SUCCESS)
+		OSLockMutex(&g_nn_save->mutex);
+
+		uint32 persistentId;
+		if (GetPersistentIdEx(accountSlot, &persistentId))
 		{
-			coreinit_suspendThread(currentThread, 1000);
-			PPCCore_switchToScheduler();
-			return param->returnStatus;
+			char fullPath[SAVE_MAX_PATH_SIZE];
+			if (GetAbsoluteFullPathOtherApplication(persistentId, titleId, path, fullPath) == FS_RESULT::SUCCESS)
+				result = coreinit::__FSQueryInfoAsync(client, block, (uint8*)fullPath, FSA_QUERY_TYPE_STAT, stat, errHandling, (FSAsyncParams*)asyncParams); // FSGetStatAsync(...)
 		}
+		else
+			result = (FSStatus)FS_RESULT::NOT_FOUND;
 
-		return status;
-	}
+		OSUnlockMutex(&g_nn_save->mutex);
 
-	void export_SAVEGetStat(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(path, const char, 3);
-		ppcDefineParamMEMPTR(stat, FSStat_t, 4);
-		ppcDefineParamU32(errHandling, 5);
-
-		const SAVEStatus result = SAVEGetStat(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, path.GetPtr(), stat.GetPtr(), errHandling);
-		cemuLog_log(LogType::Save, "SAVEGetStat(0x{:08x}, 0x{:08x}, {:x}, {}, 0x{:08x}, {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, path.GetPtr(), stat.GetMPTR(), errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	void export_SAVEGetStatOtherApplicationAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU64(titleId, 2);
-		ppcDefineParamU8(accountSlot, 4);
-		ppcDefineParamMEMPTR(path, const char, 5);
-		ppcDefineParamMEMPTR(stat, FSStat_t, 6);
-		ppcDefineParamU32(errHandling, 7);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParams_t, 8);
-
-		const SAVEStatus result = SAVEGetStatOtherApplicationAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), titleId, accountSlot, path.GetPtr(), stat.GetPtr(), errHandling, asyncParams.GetPtr());
-		osLib_returnFromFunction(hCPU, result);
+		return result;
 	}
 
 	SAVEStatus SAVEGetStatOtherApplication(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint64 titleId, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling)
 	{
-		MEMPTR<OSThread_t> currentThread{coreinit::OSGetCurrentThread()};
-		FSAsyncParams_t asyncParams;
-		asyncParams.ioMsgQueue = MPTR_NULL;
-		asyncParams.userCallback = _swapEndianU32(PPCInterpreter_makeCallableExportDepr(AsyncCallback));
-
-		StackAllocator<AsyncCallbackParam_t> param;
-		param->thread = currentThread;
-		param->returnStatus = (FSStatus)FS_RESULT::SUCCESS;
-		asyncParams.userContext = param.GetMPTRBE();
-
-		SAVEStatus status = SAVEGetStatOtherApplicationAsync(client, block, titleId, accountSlot, path, stat, errHandling, &asyncParams);
-		if (status == (FSStatus)FS_RESULT::SUCCESS)
-		{
-			coreinit_suspendThread(currentThread, 1000);
-			PPCCore_switchToScheduler();
-			return param->returnStatus;
-		}
-
-		return status;
+		StackAllocator<AsyncToSyncWrapper> asyncData;
+		SAVEStatus status = SAVEGetStatOtherApplicationAsync(client, block, titleId, accountSlot, path, stat, errHandling, asyncData->GetAsyncParams());
+		if (status != (FSStatus)FS_RESULT::SUCCESS)
+			return status;
+		asyncData->WaitForEvent();
+		return asyncData->GetResult();
 	}
 
-	void export_SAVEGetStatOtherApplication(PPCInterpreter_t* hCPU)
+	SAVEStatus SAVEGetStatOtherNormalApplicationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
 	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU64(titleId, 2);
-		ppcDefineParamU8(accountSlot, 4);
-		ppcDefineParamMEMPTR(path, const char, 5);
-		ppcDefineParamMEMPTR(stat, FSStat_t, 6);
-		ppcDefineParamU32(errHandling, 7);
-
-		const SAVEStatus result = SAVEGetStatOtherApplication(fsClient.GetPtr(), fsCmdBlock.GetPtr(), titleId, accountSlot, path.GetPtr(), stat.GetPtr(), errHandling);
-		osLib_returnFromFunction(hCPU, result);
-	}
-	
-
-	void export_SAVEGetStatOtherNormalApplicationAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU32(uniqueId, 2);
-		ppcDefineParamU8(accountSlot, 3);
-		ppcDefineParamMEMPTR(path, const char, 4);
-		ppcDefineParamMEMPTR(stat, FSStat_t, 5);
-		ppcDefineParamU32(errHandling, 6);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParams_t, 8);
-
-		const SAVEStatus result = SAVEGetStatOtherNormalApplicationAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), uniqueId, accountSlot, path.GetPtr(), stat.GetPtr(), errHandling, asyncParams.GetPtr());
-		osLib_returnFromFunction(hCPU, result);
+		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID(uniqueId);
+		return SAVEGetStatOtherApplicationAsync(client, block, titleId, accountSlot, path, stat, errHandling, asyncParams);
 	}
 
 	SAVEStatus SAVEGetStatOtherNormalApplication(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling)
 	{
-		//peterBreak();
-
 		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID(uniqueId);
 		return SAVEGetStatOtherApplication(client, block, titleId, accountSlot, path, stat, errHandling);
 	}
 
-	void export_SAVEGetStatOtherNormalApplication(PPCInterpreter_t* hCPU)
+	SAVEStatus SAVEGetStatOtherDemoApplicationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
 	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU32(uniqueId, 2);
-		ppcDefineParamU8(accountSlot, 3);
-		ppcDefineParamMEMPTR(path, const char, 4);
-		ppcDefineParamMEMPTR(stat, FSStat_t, 5);
-		ppcDefineParamU32(errHandling, 6);
-
-		const SAVEStatus result = SAVEGetStatOtherNormalApplication(fsClient.GetPtr(), fsCmdBlock.GetPtr(), uniqueId, accountSlot, path.GetPtr(), stat.GetPtr(), errHandling);
-		osLib_returnFromFunction(hCPU, result);
+		uint64 titleId = SAVE_UNIQUE_DEMO_TO_TITLE_ID(uniqueId);
+		return SAVEGetStatOtherApplicationAsync(client, block, titleId, accountSlot, path, stat, errHandling, asyncParams);
 	}
 
-
-
-	void export_SAVEGetStatOtherNormalApplicationVariationAsync(PPCInterpreter_t* hCPU)
+	SAVEStatus SAVEGetStatOtherNormalApplicationVariationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 variation, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
 	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU32(uniqueId, 2);
-		ppcDefineParamU8(variation, 3);
-		ppcDefineParamU8(accountSlot, 4);
-		ppcDefineParamMEMPTR(path, const char, 5);
-		ppcDefineParamMEMPTR(stat, FSStat_t, 6);
-		ppcDefineParamU32(errHandling, 7);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParams_t, 8);
+		uint64 titleId = SAVE_UNIQUE_TO_TITLE_ID_VARIATION(uniqueId, variation);
+		return SAVEGetStatOtherApplicationAsync(client, block, titleId, accountSlot, path, stat, errHandling, asyncParams);
+	}
 
-		const SAVEStatus result = SAVEGetStatOtherNormalApplicationVariationAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), uniqueId, variation, accountSlot, path.GetPtr(), stat.GetPtr(), errHandling, asyncParams.GetPtr());
-		osLib_returnFromFunction(hCPU, result);
+	SAVEStatus SAVEGetStatOtherDemoApplicationVariationAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 variation, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
+	{
+		uint64 titleId = SAVE_UNIQUE_DEMO_TO_TITLE_ID_VARIATION(uniqueId, variation);
+		return SAVEGetStatOtherApplicationAsync(client, block, titleId, accountSlot, path, stat, errHandling, asyncParams);
 	}
 
 	SAVEStatus SAVEGetStatOtherNormalApplicationVariation(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint32 uniqueId, uint8 variation, uint8 accountSlot, const char* path, FSStat_t* stat, FS_ERROR_MASK errHandling)
@@ -1340,21 +623,140 @@ namespace save
 		return SAVEGetStatOtherApplication(client, block, titleId, accountSlot, path, stat, errHandling);
 	}
 
-	void export_SAVEGetStatOtherNormalApplicationVariation(PPCInterpreter_t* hCPU)
+	SAVEStatus SAVEGetFreeSpaceSizeAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, FSLargeSize* freeSize, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
 	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU32(uniqueId, 2);
-		ppcDefineParamU8(variation, 3);
-		ppcDefineParamU8(accountSlot, 4);
-		ppcDefineParamMEMPTR(path, const char, 5);
-		ppcDefineParamMEMPTR(stat, FSStat_t, 6);
-		ppcDefineParamU32(errHandling, 7);
+		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
 
-		const SAVEStatus result = SAVEGetStatOtherNormalApplicationVariation(fsClient.GetPtr(), fsCmdBlock.GetPtr(), uniqueId, variation, accountSlot, path.GetPtr(), stat.GetPtr(), errHandling);
-		osLib_returnFromFunction(hCPU, result);
+		OSLockMutex(&g_nn_save->mutex);
+
+		uint32 persistentId;
+		if (GetPersistentIdEx(accountSlot, &persistentId))
+		{
+			char fullPath[SAVE_MAX_PATH_SIZE];
+			if (GetAbsoluteFullPath(persistentId, nullptr, fullPath))
+				result = coreinit::FSGetFreeSpaceSizeAsync(client, block, fullPath, freeSize, errHandling, (FSAsyncParams*)asyncParams);
+		}
+		else
+			result = (FSStatus)FS_RESULT::NOT_FOUND;
+
+		OSUnlockMutex(&g_nn_save->mutex);
+
+		return result;
 	}
 
+	SAVEStatus SAVEGetFreeSpaceSize(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, FSLargeSize* freeSize, FS_ERROR_MASK errHandling)
+	{
+		StackAllocator<AsyncToSyncWrapper> asyncData;
+		SAVEStatus status = SAVEGetFreeSpaceSizeAsync(client, block, accountSlot, freeSize, errHandling, asyncData->GetAsyncParams());
+		if (status != (FSStatus)FS_RESULT::SUCCESS)
+			return status;
+		asyncData->WaitForEvent();
+		return asyncData->GetResult();
+	}
+
+	SAVEStatus SAVERemoveAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
+	{
+		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
+
+		OSLockMutex(&g_nn_save->mutex);
+
+		uint32 persistentId;
+		if (GetPersistentIdEx(accountSlot, &persistentId))
+		{
+			char fullPath[SAVE_MAX_PATH_SIZE];
+			if (GetAbsoluteFullPath(persistentId, path, fullPath))
+				result = coreinit::FSRemoveAsync(client, block, (uint8*)fullPath, errHandling, (FSAsyncParams*)asyncParams);
+		}
+		else
+			result = (FSStatus)FS_RESULT::NOT_FOUND;
+
+		OSUnlockMutex(&g_nn_save->mutex);
+		return result;
+	}
+
+	SAVEStatus SAVERemove(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FS_ERROR_MASK errHandling)
+	{
+		StackAllocator<AsyncToSyncWrapper> asyncData;
+		SAVEStatus status = SAVERemoveAsync(client, block, accountSlot, path, errHandling, asyncData->GetAsyncParams());
+		if (status != (FSStatus)FS_RESULT::SUCCESS)
+			return status;
+		asyncData->WaitForEvent();
+		return asyncData->GetResult();
+	}
+
+	SAVEStatus SAVERenameAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* oldPath, const char* newPath, FS_ERROR_MASK errHandling, FSAsyncParams* asyncParams)
+	{
+		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
+		OSLockMutex(&g_nn_save->mutex);
+
+		uint32 persistentId;
+		if (GetPersistentIdEx(accountSlot, &persistentId))
+		{
+			char fullOldPath[SAVE_MAX_PATH_SIZE];
+			if (GetAbsoluteFullPath(persistentId, oldPath, fullOldPath))
+			{
+				char fullNewPath[SAVE_MAX_PATH_SIZE];
+				if (GetAbsoluteFullPath(persistentId, newPath, fullNewPath))
+					result = coreinit::FSRenameAsync(client, block, fullOldPath, fullNewPath, errHandling, asyncParams);
+			}
+		}
+		else
+			result = (FSStatus)FS_RESULT::NOT_FOUND;
+
+		OSUnlockMutex(&g_nn_save->mutex);
+		return result;
+	}
+
+	SAVEStatus SAVERename(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* oldPath, const char* newPath, FS_ERROR_MASK errHandling)
+	{
+		StackAllocator<AsyncToSyncWrapper> asyncData;
+		SAVEStatus status = SAVERenameAsync(client, block, accountSlot, oldPath, newPath, errHandling, asyncData->GetAsyncParams());
+		if (status != (FSStatus)FS_RESULT::SUCCESS)
+			return status;
+		asyncData->WaitForEvent();
+		return asyncData->GetResult();
+	}
+
+	SAVEStatus SAVEMakeDirAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
+	{
+		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
+
+		OSLockMutex(&g_nn_save->mutex);
+
+		uint32 persistentId;
+		if (GetPersistentIdEx(accountSlot, &persistentId))
+		{
+			char fullPath[SAVE_MAX_PATH_SIZE];
+			if (GetAbsoluteFullPath(persistentId, path, fullPath))
+				result = coreinit::FSMakeDirAsync(client, block, fullPath, errHandling, (FSAsyncParams*)asyncParams);
+		}
+		else
+			result = (FSStatus)FS_RESULT::NOT_FOUND;
+
+		OSUnlockMutex(&g_nn_save->mutex);
+
+		return result;
+	}
+
+	SAVEStatus SAVEMakeDir(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FS_ERROR_MASK errHandling)
+	{
+		StackAllocator<AsyncToSyncWrapper> asyncData;
+		SAVEStatus status = SAVEMakeDirAsync(client, block, accountSlot, path, errHandling, asyncData->GetAsyncParams());
+		if (status != (FSStatus)FS_RESULT::SUCCESS)
+			return status;
+		asyncData->WaitForEvent();
+		return asyncData->GetResult();
+	}
+
+	SAVEStatus SAVEOpenFile(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, const char* mode, FSFileHandlePtr outFileHandle, FS_ERROR_MASK errHandling)
+	{
+		StackAllocator<AsyncToSyncWrapper> asyncData;
+		SAVEStatus status = SAVEOpenFileAsync(client, block, accountSlot, path, mode, outFileHandle, errHandling, asyncData->GetAsyncParams());
+		if (status != (FSStatus)FS_RESULT::SUCCESS)
+			return status;
+		asyncData->WaitForEvent();
+		return asyncData->GetResult();
+	}
 
 	SAVEStatus SAVEGetSharedDataTitlePath(uint64 titleId, const char* dataFileName, char* output, sint32 outputLength)
 	{
@@ -1364,17 +766,6 @@ namespace save
 			result = (FSStatus)FS_RESULT::SUCCESS;
 		cemu_assert_debug(result != (FSStatus)(FS_RESULT::FATAL_ERROR));
 		return result;
-	}
-
-	void export_SAVEGetSharedDataTitlePath(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamU64(titleId, 0);
-		ppcDefineParamMEMPTR(dataFileName, const char, 2);
-		ppcDefineParamMEMPTR(output, char, 3);
-		ppcDefineParamS32(outputLength, 4);
-		const SAVEStatus result = SAVEGetSharedDataTitlePath(titleId, dataFileName.GetPtr(), output.GetPtr(), outputLength);
-		cemuLog_log(LogType::Save, "SAVEGetSharedDataTitlePath(0x{:x}, {}, {}, 0x{:x}) -> {:x}", titleId, dataFileName.GetPtr(), output.GetPtr(), outputLength, result);
-		osLib_returnFromFunction(hCPU, result);
 	}
 
 	SAVEStatus SAVEGetSharedSaveDataPath(uint64 titleId, const char* dataFileName, char* output, uint32 outputLength)
@@ -1387,17 +778,7 @@ namespace save
 		return result;
 	}
 
-	void export_SAVEGetSharedSaveDataPath(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamU64(titleId, 0);
-		ppcDefineParamMEMPTR(dataFileName, const char, 2);
-		ppcDefineParamMEMPTR(output, char, 3);
-		ppcDefineParamU32(outputLength, 4);
-		const SAVEStatus result = SAVEGetSharedSaveDataPath(titleId, dataFileName.GetPtr(), output.GetPtr(), outputLength);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVEChangeDirAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
+	SAVEStatus SAVEChangeDirAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
 	{
 		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
 
@@ -1407,7 +788,7 @@ namespace save
 		{
 			char fullPath[SAVE_MAX_PATH_SIZE];
 			if (GetAbsoluteFullPath(persistentId, path, fullPath))
-				result = coreinit::FSChangeDirAsync(client, block, fullPath, errHandling, (FSAsyncParamsNew_t*)asyncParams);
+				result = coreinit::FSChangeDirAsync(client, block, fullPath, errHandling, (FSAsyncParams*)asyncParams);
 		}
 		else
 			result = (FSStatus)FS_RESULT::NOT_FOUND;
@@ -1416,55 +797,17 @@ namespace save
 		return result;
 	}
 
-	void export_SAVEChangeDirAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(path, const char, 3);
-		ppcDefineParamU32(errHandling, 4);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParams_t, 5);
-		const SAVEStatus result = SAVEChangeDirAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, path.GetPtr(), errHandling, asyncParams.GetPtr());
-		cemuLog_log(LogType::Save, "SAVEChangeDirAsync(0x{:08x}, 0x{:08x}, {:x}, {}, {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, path.GetPtr(), errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
 	SAVEStatus SAVEChangeDir(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, const char* path, FS_ERROR_MASK errHandling)
 	{
-		MEMPTR<OSThread_t> currentThread{coreinit::OSGetCurrentThread()};
-		FSAsyncParams_t asyncParams;
-		asyncParams.ioMsgQueue = MPTR_NULL;
-		asyncParams.userCallback = _swapEndianU32(PPCInterpreter_makeCallableExportDepr(AsyncCallback));
-
-		StackAllocator<AsyncCallbackParam_t> param;
-		param->thread = currentThread;
-		param->returnStatus = (FSStatus)FS_RESULT::SUCCESS;
-		asyncParams.userContext = param.GetMPTRBE();
-
-		SAVEStatus status = SAVEChangeDirAsync(client, block, accountSlot, path, errHandling, &asyncParams);
-		if (status == (FSStatus)FS_RESULT::SUCCESS)
-		{
-			coreinit_suspendThread(currentThread, 1000);
-			PPCCore_switchToScheduler();
-			return param->returnStatus;
-		}
-
-		return status;
+		StackAllocator<AsyncToSyncWrapper> asyncData;
+		SAVEStatus status = SAVEChangeDirAsync(client, block, accountSlot, path, errHandling, asyncData->GetAsyncParams());
+		if (status != (FSStatus)FS_RESULT::SUCCESS)
+			return status;
+		asyncData->WaitForEvent();
+		return asyncData->GetResult();
 	}
 
-	void export_SAVEChangeDir(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamMEMPTR(path, const char, 3);
-		ppcDefineParamU32(errHandling, 4);
-		const SAVEStatus result = SAVEChangeDir(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, path.GetPtr(), errHandling);
-		cemuLog_log(LogType::Save, "SAVEChangeDir(0x{:08x}, 0x{:08x}, {:x}, {}, {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, path.GetPtr(), errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
-	SAVEStatus SAVEFlushQuotaAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, FS_ERROR_MASK errHandling, const FSAsyncParams_t* asyncParams)
+	SAVEStatus SAVEFlushQuotaAsync(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot, FS_ERROR_MASK errHandling, const FSAsyncParams* asyncParams)
 	{
 		SAVEStatus result = (FSStatus)(FS_RESULT::FATAL_ERROR);
 
@@ -1475,7 +818,7 @@ namespace save
 			char fullPath[SAVE_MAX_PATH_SIZE];
 			if (GetAbsoluteFullPath(persistentId, nullptr, fullPath))
 			{
-				result = coreinit::FSFlushQuotaAsync(client, block, fullPath, errHandling, (FSAsyncParamsNew_t*)asyncParams);
+				result = coreinit::FSFlushQuotaAsync(client, block, fullPath, errHandling, (FSAsyncParams*)asyncParams);
 				// if(OSGetUPID != 0xF)
 				UpdateSaveTimeStamp(persistentId);
 			}
@@ -1487,106 +830,63 @@ namespace save
 		return result;
 	}
 
-	void export_SAVEFlushQuotaAsync(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamU32(errHandling, 3);
-		ppcDefineParamMEMPTR(asyncParams, FSAsyncParams_t, 4);
-		const SAVEStatus result = SAVEFlushQuotaAsync(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, errHandling, asyncParams.GetPtr());
-		cemuLog_log(LogType::Save, "SAVEFlushQuotaAsync(0x{:08x}, 0x{:08x}, {:x}, {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
-	}
-
 	SAVEStatus SAVEFlushQuota(coreinit::FSClient_t* client, coreinit::FSCmdBlock_t* block, uint8 accountSlot,  FS_ERROR_MASK errHandling)
 	{
-		MEMPTR<OSThread_t> currentThread{coreinit::OSGetCurrentThread()};
-		FSAsyncParams_t asyncParams;
-		asyncParams.ioMsgQueue = MPTR_NULL;
-		asyncParams.userCallback = _swapEndianU32(PPCInterpreter_makeCallableExportDepr(AsyncCallback));
-
-		StackAllocator<AsyncCallbackParam_t> param;
-		param->thread = currentThread;
-		param->returnStatus = (FSStatus)FS_RESULT::SUCCESS;
-		asyncParams.userContext = param.GetMPTRBE();
-
-		SAVEStatus status = SAVEFlushQuotaAsync(client, block, accountSlot, errHandling, &asyncParams);
-		if (status == (FSStatus)FS_RESULT::SUCCESS)
-		{
-			coreinit_suspendThread(currentThread, 1000);
-			PPCCore_switchToScheduler();
-			return param->returnStatus;
-		}
-		return status;
-	}
-
-	void export_SAVEFlushQuota(PPCInterpreter_t* hCPU)
-	{
-		ppcDefineParamMEMPTR(fsClient, coreinit::FSClient_t, 0);
-		ppcDefineParamMEMPTR(fsCmdBlock, coreinit::FSCmdBlock_t, 1);
-		ppcDefineParamU8(accountSlot, 2);
-		ppcDefineParamU32(errHandling, 3);
-		const SAVEStatus result = SAVEFlushQuota(fsClient.GetPtr(), fsCmdBlock.GetPtr(), accountSlot, errHandling);
-		cemuLog_log(LogType::Save, "SAVEFlushQuota(0x{:08x}, 0x{:08x}, {:x}, {:x}) -> {:x}", fsClient.GetMPTR(), fsCmdBlock.GetMPTR(), accountSlot, errHandling, result);
-		osLib_returnFromFunction(hCPU, result);
+		StackAllocator<AsyncToSyncWrapper> asyncData;
+		SAVEStatus status = SAVEFlushQuotaAsync(client, block, accountSlot, errHandling, asyncData->GetAsyncParams());
+		if (status != (FSStatus)FS_RESULT::SUCCESS)
+			return status;
+		asyncData->WaitForEvent();
+		return asyncData->GetResult();
 	}
 
 	void load()
 	{
+		cafeExportRegister("nn_save", SAVEInit, LogType::Save);
+		cafeExportRegister("nn_save", SAVEInitSaveDir, LogType::Save);
 
+		cafeExportRegister("nn_save", SAVEGetSharedDataTitlePath, LogType::Save);
+		cafeExportRegister("nn_save", SAVEGetSharedSaveDataPath, LogType::Save);
 
-		osLib_addFunction("nn_save", "SAVEInit", export_SAVEInit);
-		osLib_addFunction("nn_save", "SAVEInitSaveDir", export_SAVEInitSaveDir);
-		osLib_addFunction("nn_save", "SAVEGetSharedDataTitlePath", export_SAVEGetSharedDataTitlePath);
-		osLib_addFunction("nn_save", "SAVEGetSharedSaveDataPath", export_SAVEGetSharedSaveDataPath);
+		cafeExportRegister("nn_save", SAVEGetFreeSpaceSize, LogType::Save);
+		cafeExportRegister("nn_save", SAVEGetFreeSpaceSizeAsync, LogType::Save);
+		cafeExportRegister("nn_save", SAVEMakeDir, LogType::Save);
+		cafeExportRegister("nn_save", SAVEMakeDirAsync, LogType::Save);
+		cafeExportRegister("nn_save", SAVERemove, LogType::Save);
+		cafeExportRegister("nn_save", SAVERemoveAsync, LogType::Save);
+		cafeExportRegister("nn_save", SAVEChangeDir, LogType::Save);
+		cafeExportRegister("nn_save", SAVEChangeDirAsync, LogType::Save);
+		cafeExportRegister("nn_save", SAVERename, LogType::Save);
+		cafeExportRegister("nn_save", SAVERenameAsync, LogType::Save);
+		cafeExportRegister("nn_save", SAVEFlushQuota, LogType::Save);
+		cafeExportRegister("nn_save", SAVEFlushQuotaAsync, LogType::Save);
 
-		// sync functions
-		osLib_addFunction("nn_save", "SAVEGetFreeSpaceSize", export_SAVEGetFreeSpaceSize);
-		osLib_addFunction("nn_save", "SAVEMakeDir", export_SAVEMakeDir);
-		osLib_addFunction("nn_save", "SAVERemove", export_SAVERemove);
-		osLib_addFunction("nn_save", "SAVEChangeDir", export_SAVEChangeDir);
-		osLib_addFunction("nn_save", "SAVEFlushQuota", export_SAVEFlushQuota);
+		cafeExportRegister("nn_save", SAVEGetStat, LogType::Save);
+		cafeExportRegister("nn_save", SAVEGetStatAsync, LogType::Save);
+		cafeExportRegister("nn_save", SAVEGetStatOtherApplication, LogType::Save);
+		cafeExportRegister("nn_save", SAVEGetStatOtherApplicationAsync, LogType::Save);
+		cafeExportRegister("nn_save", SAVEGetStatOtherNormalApplication, LogType::Save);
+		cafeExportRegister("nn_save", SAVEGetStatOtherNormalApplicationAsync, LogType::Save);
+		cafeExportRegister("nn_save", SAVEGetStatOtherNormalApplicationVariation, LogType::Save);
+		cafeExportRegister("nn_save", SAVEGetStatOtherNormalApplicationVariationAsync, LogType::Save);
 
-		osLib_addFunction("nn_save", "SAVEGetStat", export_SAVEGetStat);
-		osLib_addFunction("nn_save", "SAVEGetStatOtherApplication", export_SAVEGetStatOtherApplication);
-		osLib_addFunction("nn_save", "SAVEGetStatOtherNormalApplication", export_SAVEGetStatOtherNormalApplication);
-		osLib_addFunction("nn_save", "SAVEGetStatOtherNormalApplicationVariation", export_SAVEGetStatOtherNormalApplicationVariation);
+		cafeExportRegister("nn_save", SAVEOpenFile, LogType::Save);
+		cafeExportRegister("nn_save", SAVEOpenFileAsync, LogType::Save);
+		cafeExportRegister("nn_save", SAVEOpenFileOtherApplication, LogType::Save);
+		cafeExportRegister("nn_save", SAVEOpenFileOtherApplicationAsync, LogType::Save);
+		cafeExportRegister("nn_save", SAVEOpenFileOtherNormalApplication, LogType::Save);
+		cafeExportRegister("nn_save", SAVEOpenFileOtherNormalApplicationAsync, LogType::Save);
+		cafeExportRegister("nn_save", SAVEOpenFileOtherNormalApplicationVariation, LogType::Save);
+		cafeExportRegister("nn_save", SAVEOpenFileOtherNormalApplicationVariationAsync, LogType::Save);
 
-		osLib_addFunction("nn_save", "SAVEOpenFile", export_SAVEOpenFile);
-		osLib_addFunction("nn_save", "SAVEOpenFileOtherApplication", export_SAVEOpenFileOtherApplication);
-		osLib_addFunction("nn_save", "SAVEOpenFileOtherNormalApplication", export_SAVEOpenFileOtherNormalApplication);
-		osLib_addFunction("nn_save", "SAVEOpenFileOtherNormalApplicationVariation", export_SAVEOpenFileOtherNormalApplicationVariation);
-
-		osLib_addFunction("nn_save", "SAVEOpenDir", export_SAVEOpenDir);
-		osLib_addFunction("nn_save", "SAVEOpenDirOtherApplication", export_SAVEOpenDirOtherApplication);
-		osLib_addFunction("nn_save", "SAVEOpenDirOtherNormalApplication", export_SAVEOpenDirOtherNormalApplication);
-		osLib_addFunction("nn_save", "SAVEOpenDirOtherNormalApplicationVariation", export_SAVEOpenDirOtherNormalApplicationVariation);
-
-		// async functions
-		osLib_addFunction("nn_save", "SAVEGetFreeSpaceSizeAsync", export_SAVEGetFreeSpaceSizeAsync);
-		osLib_addFunction("nn_save", "SAVEMakeDirAsync", export_SAVEMakeDirAsync);
-		osLib_addFunction("nn_save", "SAVERemoveAsync", export_SAVERemoveAsync);
-		osLib_addFunction("nn_save", "SAVERenameAsync", export_SAVERenameAsync);
-		cafeExportRegister("nn_save", SAVERename, LogType::Save);		
-
-		osLib_addFunction("nn_save", "SAVEChangeDirAsync", export_SAVEChangeDirAsync);
-		osLib_addFunction("nn_save", "SAVEFlushQuotaAsync", export_SAVEFlushQuotaAsync);
-
-		osLib_addFunction("nn_save", "SAVEGetStatAsync", export_SAVEGetStatAsync);
-		osLib_addFunction("nn_save", "SAVEGetStatOtherApplicationAsync", export_SAVEGetStatOtherApplicationAsync);
-		osLib_addFunction("nn_save", "SAVEGetStatOtherNormalApplicationAsync", export_SAVEGetStatOtherNormalApplicationAsync);
-		osLib_addFunction("nn_save", "SAVEGetStatOtherNormalApplicationVariationAsync", export_SAVEGetStatOtherNormalApplicationVariationAsync);
-
-		osLib_addFunction("nn_save", "SAVEOpenFileAsync", export_SAVEOpenFileAsync);
-		osLib_addFunction("nn_save", "SAVEOpenFileOtherApplicationAsync", export_SAVEOpenFileOtherApplicationAsync);
-		osLib_addFunction("nn_save", "SAVEOpenFileOtherNormalApplicationAsync", export_SAVEOpenFileOtherNormalApplicationAsync);
-		osLib_addFunction("nn_save", "SAVEOpenFileOtherNormalApplicationVariationAsync", export_SAVEOpenFileOtherNormalApplicationVariationAsync);
-		
-		osLib_addFunction("nn_save", "SAVEOpenDirAsync", export_SAVEOpenDirAsync);
-		osLib_addFunction("nn_save", "SAVEOpenDirOtherApplicationAsync", export_SAVEOpenDirOtherApplicationAsync);
-		osLib_addFunction("nn_save", "SAVEOpenDirOtherNormalApplicationAsync", export_SAVEOpenDirOtherNormalApplicationAsync);
-		osLib_addFunction("nn_save", "SAVEOpenDirOtherNormalApplicationVariationAsync", export_SAVEOpenDirOtherNormalApplicationVariationAsync);
+		cafeExportRegister("nn_save", SAVEOpenDir, LogType::Save);
+		cafeExportRegister("nn_save", SAVEOpenDirAsync, LogType::Save);
+		cafeExportRegister("nn_save", SAVEOpenDirOtherApplication, LogType::Save);
+		cafeExportRegister("nn_save", SAVEOpenDirOtherApplicationAsync, LogType::Save);
+		cafeExportRegister("nn_save", SAVEOpenDirOtherNormalApplication, LogType::Save);
+		cafeExportRegister("nn_save", SAVEOpenDirOtherNormalApplicationVariation, LogType::Save);
+		cafeExportRegister("nn_save", SAVEOpenDirOtherNormalApplicationAsync, LogType::Save);
+		cafeExportRegister("nn_save", SAVEOpenDirOtherNormalApplicationVariationAsync, LogType::Save);
 	}
 
     void ResetToDefaultState()

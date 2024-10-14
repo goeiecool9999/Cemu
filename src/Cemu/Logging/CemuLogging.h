@@ -7,7 +7,7 @@ enum class LogType : sint32
 	// note: IDs must be in range 1-64
 	Force = 63, // always enabled
 	Placeholder = 62, // always disabled
-	APIErrors = Force, // alias for Force. Logs bad parameters or other API usage mistakes or unintended errors in OS libs
+	APIErrors = 61, // Logs bad parameters or other API usage mistakes or unintended errors in OS libs. Intended for homebrew developers
 
 	CoreinitFile = 0,
 	GX2 = 1,
@@ -41,7 +41,12 @@ enum class LogType : sint32
 	TextureReadback = 29,
 
 	ProcUi = 39,
+	nlibcurl = 41,
 
+	PRUDP = 40,
+
+	NFC	= 41,
+	NTAG = 42,
 };
 
 template <>
@@ -86,7 +91,11 @@ bool cemuLog_log(LogType type, std::basic_string<T> formatStr, TArgs&&... args)
 	else
 	{
 		const auto format_view = fmt::basic_string_view<T>(formatStr);
+#if FMT_VERSION >= 110000
+		const auto text = fmt::vformat(format_view, fmt::make_format_args<fmt::buffered_context<T>>(args...));
+#else
 		const auto text = fmt::vformat(format_view, fmt::make_format_args<fmt::buffer_context<T>>(args...));
+#endif
 		cemuLog_log(type, std::basic_string_view(text.data(), text.size()));
 	}
 	return true;

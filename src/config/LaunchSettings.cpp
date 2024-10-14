@@ -69,11 +69,7 @@ bool LaunchSettings::HandleCommandline(const std::vector<std::wstring>& args)
 		("account,a", po::value<std::string>(), "Persistent id of account")
 
 		("force-interpreter", po::value<bool>()->implicit_value(true), "Force interpreter CPU emulation, disables recompiler")
-		("enable-gdbstub", po::value<bool>()->implicit_value(true), "Enable GDB stub to debug executables inside Cemu using an external debugger")
-
-		("act-url", po::value<std::string>(), "URL prefix for account server")
-		("ecs-url", po::value<std::string>(), "URL for ECS service");
-
+		("enable-gdbstub", po::value<bool>()->implicit_value(true), "Enable GDB stub to debug executables inside Cemu using an external debugger");
 
 	po::options_description hidden{ "Hidden options" };
 	hidden.add_options()
@@ -116,10 +112,10 @@ bool LaunchSettings::HandleCommandline(const std::vector<std::wstring>& args)
 		{
 			requireConsole();
 			std::string versionStr;
-#if EMULATOR_VERSION_MINOR == 0
-			versionStr = fmt::format("{}.{}{}", EMULATOR_VERSION_LEAD, EMULATOR_VERSION_MAJOR, EMULATOR_VERSION_SUFFIX);
+#if EMULATOR_VERSION_PATCH == 0
+			versionStr = fmt::format("{}.{}{}", EMULATOR_VERSION_MAJOR, EMULATOR_VERSION_MINOR, EMULATOR_VERSION_SUFFIX);
 #else
-			versionStr = fmt::format("{}.{}-{}{}", EMULATOR_VERSION_LEAD, EMULATOR_VERSION_MAJOR, EMULATOR_VERSION_MINOR, EMULATOR_VERSION_SUFFIX);
+			versionStr = fmt::format("{}.{}-{}{}", EMULATOR_VERSION_MAJOR, EMULATOR_VERSION_MINOR, EMULATOR_VERSION_PATCH, EMULATOR_VERSION_SUFFIX);
 #endif
 			std::cout << versionStr << std::endl;
 			return false; // exit in main
@@ -189,16 +185,6 @@ bool LaunchSettings::HandleCommandline(const std::vector<std::wstring>& args)
 			output_path = vm["path"].as<std::string>();
 		if (vm.count("output"))
 			log_path = vm["output"].as<std::wstring>();
-
-		// urls
-		if (vm.count("act-url"))
-		{
-			serviceURL_ACT = vm["act-url"].as<std::string>();
-			if (serviceURL_ACT.size() > 0 && serviceURL_ACT.back() == '/')
-				serviceURL_ACT.pop_back();
-		}
-		if (vm.count("ecs-url"))
-			serviceURL_ECS = vm["ecs-url"].as<std::string>();
 
 		if(!extract_path.empty())
 		{
@@ -279,25 +265,4 @@ bool LaunchSettings::ExtractorTool(std::wstring_view wud_path, std::string_view 
 	}
 	
 	return true;
-}
-
-
-void LaunchSettings::ChangeNetworkServiceURL(int ID){
-	NetworkService Network = static_cast<NetworkService>(ID);
-	switch (Network)
-	{
-	case NetworkService::Pretendo:
-		serviceURL_ACT = PretendoURLs::ACTURL;
-	 	serviceURL_ECS = PretendoURLs::ECSURL;
-		break;
-	case NetworkService::Custom:
-		serviceURL_ACT = GetNetworkConfig().urls.ACT.GetValue();
-	 	serviceURL_ECS = GetNetworkConfig().urls.ECS.GetValue();
-		break;
-	case NetworkService::Nintendo:
-	default:
-		serviceURL_ACT = NintendoURLs::ACTURL;
-	 	serviceURL_ECS = NintendoURLs::ECSURL;
-		break;
-	}
 }

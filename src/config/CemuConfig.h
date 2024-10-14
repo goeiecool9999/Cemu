@@ -8,6 +8,8 @@
 #include <wx/language.h>
 #include <wx/intl.h>
 
+enum class NetworkService;
+
 struct GameEntry
 {
 	GameEntry() = default;
@@ -192,7 +194,7 @@ ENABLE_ENUM_ITERATORS(CrashDump, CrashDump::Disabled, CrashDump::Enabled);
 template <>
 struct fmt::formatter<PrecompiledShaderOption> : formatter<string_view> {
 	template <typename FormatContext>
-	auto format(const PrecompiledShaderOption c, FormatContext &ctx) {
+	auto format(const PrecompiledShaderOption c, FormatContext &ctx) const {
 		string_view name;
 		switch (c)
 		{
@@ -207,7 +209,7 @@ struct fmt::formatter<PrecompiledShaderOption> : formatter<string_view> {
 template <>
 struct fmt::formatter<AccurateShaderMulOption> : formatter<string_view> {
 	template <typename FormatContext>
-	auto format(const AccurateShaderMulOption c, FormatContext &ctx) {
+	auto format(const AccurateShaderMulOption c, FormatContext &ctx) const {
 		string_view name;
 		switch (c)
 		{
@@ -221,7 +223,7 @@ struct fmt::formatter<AccurateShaderMulOption> : formatter<string_view> {
 template <>
 struct fmt::formatter<CPUMode> : formatter<string_view> {
 	template <typename FormatContext>
-	auto format(const CPUMode c, FormatContext &ctx) {
+	auto format(const CPUMode c, FormatContext &ctx) const {
 		string_view name;
 		switch (c)
 		{
@@ -238,7 +240,7 @@ struct fmt::formatter<CPUMode> : formatter<string_view> {
 template <>
 struct fmt::formatter<CPUModeLegacy> : formatter<string_view> {
 	template <typename FormatContext>
-	auto format(const CPUModeLegacy c, FormatContext &ctx) {
+	auto format(const CPUModeLegacy c, FormatContext &ctx) const {
 		string_view name;
 		switch (c)
 		{
@@ -255,7 +257,7 @@ struct fmt::formatter<CPUModeLegacy> : formatter<string_view> {
 template <>
 struct fmt::formatter<CafeConsoleRegion> : formatter<string_view> {
 	template <typename FormatContext>
-	auto format(const CafeConsoleRegion v, FormatContext &ctx) {
+	auto format(const CafeConsoleRegion v, FormatContext &ctx) const {
 		string_view name;
 		switch (v)
 		{
@@ -411,11 +413,12 @@ struct CemuConfig
 	Vector2i pad_size{ -1,-1 };
 	ConfigValue<bool> pad_maximized;
 
-	ConfigValue<bool> check_update{false};
+	ConfigValue<bool> check_update{true};
+	ConfigValue<bool> receive_untested_updates{false};
 	ConfigValue<bool> save_screenshot{true};
 
 	ConfigValue<bool> did_show_vulkan_warning{false};
-	ConfigValue<bool> did_show_graphic_pack_download{false};
+	ConfigValue<bool> did_show_graphic_pack_download{false}; // no longer used but we keep the config value around in case people downgrade Cemu. Despite the name this was used for the Getting Started dialog
 	ConfigValue<bool> did_show_macos_disclaimer{false};
 
 	ConfigValue<bool> show_icon_column{ true };
@@ -439,7 +442,7 @@ struct CemuConfig
 	ConfigValue<int> vsync{ 0 }; // 0 = off, 1+ = on depending on render backend
 	ConfigValue<bool> gx2drawdone_sync {true};
 	ConfigValue<bool> render_upside_down{ false };
-	ConfigValue<bool> async_compile{ false };
+	ConfigValue<bool> async_compile{ true };
 
 	ConfigValue<bool> vk_accurate_barriers{ true };
 
@@ -483,8 +486,9 @@ struct CemuConfig
 	struct
 	{
 		ConfigValueBounds<uint32> m_persistent_id{ Account::kMinPersistendId, Account::kMinPersistendId, 0xFFFFFFFF };
-		ConfigValue<bool> online_enabled{false};
-		ConfigValue<int> active_service{0};
+		ConfigValue<bool> legacy_online_enabled{false};
+		ConfigValue<int> legacy_active_service{0};
+		std::unordered_map<uint32, NetworkService> service_select; // per-account service index. Key is persistentId
 	}account{};
 
 	// input
@@ -508,6 +512,16 @@ struct CemuConfig
 	void SetGameListFavorite(uint64 titleId, bool isFavorite);
 	bool GetGameListCustomName(uint64 titleId, std::string& customName);
 	void SetGameListCustomName(uint64 titleId, std::string customName);
+
+	NetworkService GetAccountNetworkService(uint32 persistentId);
+	void SetAccountSelectedService(uint32 persistentId, NetworkService serviceIndex);
+	
+	// emulated usb devices
+	struct
+	{
+		ConfigValue<bool> emulate_skylander_portal{false};
+		ConfigValue<bool> emulate_infinity_base{false};
+	}emulated_usb_devices{};
 
 	private:
 	GameEntry* GetGameEntryByTitleId(uint64 titleId);

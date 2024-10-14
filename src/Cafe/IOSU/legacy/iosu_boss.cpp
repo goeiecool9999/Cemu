@@ -137,6 +137,10 @@ namespace iosu
 			this->task_settings.taskType = settings->taskType;
 
 			curl = std::shared_ptr<CURL>(curl_easy_init(), curl_easy_cleanup);
+			if(GetConfig().proxy_server.GetValue() != "")
+			{
+			  curl_easy_setopt(curl.get(), CURLOPT_PROXY, GetConfig().proxy_server.GetValue().c_str());
+			}
 		}
 	};
 
@@ -498,7 +502,7 @@ namespace iosu
 		curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, task_header_callback);
 		curl_easy_setopt(curl, CURLOPT_HEADERDATA, &(*it));
 		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0x3C);
-		if (GetNetworkConfig().disablesslver.GetValue() && ActiveSettings::GetNetworkService() == NetworkService::Custom || ActiveSettings::GetNetworkService() == NetworkService::Pretendo) // remove Pretendo Function once SSL is in the Service
+		if (IsNetworkServiceSSLDisabled(ActiveSettings::GetNetworkService()))
 		{ 
 			curl_easy_setopt(curl,CURLOPT_SSL_VERIFYPEER,0L);
 		}
