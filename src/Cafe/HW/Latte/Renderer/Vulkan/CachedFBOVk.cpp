@@ -47,8 +47,12 @@ CachedFBOVk::~CachedFBOVk()
 	auto vkr = VulkanRenderer::GetInstance();
 	vkr->ReleaseDestructibleObject(m_vkrObjFramebuffer);
 	m_vkrObjFramebuffer = nullptr;
+	vkr->ReleaseDestructibleObject(m_vkrObjFramebufferSelfReferencing);
+	m_vkrObjFramebufferSelfReferencing = nullptr;
 	vkr->ReleaseDestructibleObject(m_vkrObjRenderPass);
 	m_vkrObjRenderPass = nullptr;
+	vkr->ReleaseDestructibleObject(m_vkrObjRenderPassSelfReferencing);
+	m_vkrObjRenderPassSelfReferencing = nullptr;
 }
 
 VKRObjectTextureView* CachedFBOVk::GetColorBufferImageView(uint32 index)
