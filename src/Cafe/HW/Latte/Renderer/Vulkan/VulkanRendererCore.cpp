@@ -1270,21 +1270,43 @@ void VulkanRenderer::draw_setRenderPass()
 	if (layoutUpdatesRequired && m_featureControl.deviceExtensions.attachment_feedback_loop_layout)
 	{
 		auto transitionAll = [&](const std::vector<LatteTextureVk*>& textures, VkImageLayout newLayout) {
+			if(textures.empty())
+				return;
+			VkShaderStageFlags srcStages, dstStages;
+			VkImageMemoryBarrier baseBarrier{};
+			baseBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			baseBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			baseBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			baseBarrier.srcAccessMask = 0;
+			baseBarrier.dstAccessMask = 0;
+			barrier_calcStageAndMask<IMAGE_READ | IMAGE_WRITE>(srcStages, baseBarrier.srcAccessMask);
+			barrier_calcStageAndMask<IMAGE_READ | IMAGE_WRITE>(dstStages, baseBarrier.dstAccessMask);
+			baseBarrier.newLayout = newLayout;
+			std::vector<VkImageMemoryBarrier> layoutTransitionBarriers;
+			layoutTransitionBarriers.reserve(textures.size());
+
 			for (auto& t : textures)
 			{
 				for (size_t slice = 0; slice < t->depth; slice++)
 				{
 					for (size_t mip = 0; mip < t->mipLevels; mip++)
 					{
-						VkImageSubresourceLayers layers{};
-						layers.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-						layers.baseArrayLayer = slice;
-						layers.layerCount = 1;
-						layers.mipLevel = mip;
-						barrier_image<IMAGE_READ | IMAGE_WRITE, IMAGE_READ | IMAGE_WRITE>(t, layers, newLayout);
+						auto& newBarrier = layoutTransitionBarriers.emplace_back(baseBarrier);
+						newBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+						newBarrier.subresourceRange.baseArrayLayer = slice;
+						newBarrier.subresourceRange.layerCount = 1;
+						newBarrier.subresourceRange.baseMipLevel = mip;
+						newBarrier.subresourceRange.levelCount = 1;
+						newBarrier.image = t->GetImageObj()->m_image;
+						newBarrier.oldLayout = t->GetImageLayout(newBarrier.subresourceRange);
+						t->SetImageLayout(newBarrier.subresourceRange, newLayout);
 					}
 				}
 			}
+			vkCmdPipelineBarrier(m_state.currentCommandBuffer, srcStages, dstStages, 0,
+								 0, nullptr,
+								 0, nullptr,
+								 layoutTransitionBarriers.size(), layoutTransitionBarriers.data());
 		};
 		transitionAll(noLongerSelfReferencing, VK_IMAGE_LAYOUT_GENERAL);
 
