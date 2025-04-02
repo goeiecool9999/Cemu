@@ -971,14 +971,19 @@ void LatteRenderTarget_copyToBackbuffer(LatteTextureView* textureView, bool isPa
 		}
 	}
 	cemu_assert(shader);
-	g_renderer->DrawBackbufferQuad(textureView, shader, filter==LatteTextureView::MagFilter::kLinear, imageX, imageY, imageWidth, imageHeight, isPadView, clearBackground);
-	g_renderer->HandleScreenshotRequest(textureView, isPadView);
-	if (!g_renderer->ImguiBegin(!isPadView))
-		return;
-	swkbd_render(!isPadView);
-	nn::erreula::render(!isPadView);
-	LatteOverlay_render(isPadView);
-	g_renderer->ImguiEnd();
+	for(size_t i = 0; i < 2; i++)
+	{
+		g_renderer->DrawBackbufferQuad(textureView, shader, filter == LatteTextureView::MagFilter::kLinear, imageX, imageY, imageWidth, imageHeight, isPadView, clearBackground);
+		g_renderer->HandleScreenshotRequest(textureView, isPadView);
+		if (!g_renderer->ImguiBegin(!isPadView))
+			return;
+		swkbd_render(!isPadView);
+		nn::erreula::render(!isPadView);
+		LatteOverlay_render(isPadView);
+		g_renderer->ImguiEnd();
+		if(i == 0)
+			g_renderer->SwapBuffers(true, true);
+	}
 }
 
 void LatteRenderTarget_itHLECopyColorBufferToScanBuffer(MPTR colorBufferPtr, uint32 colorBufferWidth, uint32 colorBufferHeight, uint32 colorBufferSliceIndex, uint32 colorBufferFormat, uint32 colorBufferPitch, Latte::E_HWTILEMODE colorBufferTilemode, uint32 colorBufferSwizzle, uint32 renderTarget)
