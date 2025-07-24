@@ -164,7 +164,7 @@ void RendererShaderGL::CleanupShaderObj()
 	m_shader_object = 0;
 }
 
-void RendererShaderGL::PreponeCompilation(bool isRenderThread)
+void RendererShaderGL::PreponeCompilation()
 {
 	// the logic for initiating compilation is currently in the constructor
 	// here we only guarantee that it is finished before we return
