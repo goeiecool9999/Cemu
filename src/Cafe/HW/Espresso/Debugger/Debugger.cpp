@@ -1,17 +1,19 @@
-#include "gui/guiWrapper.h"
+#include "Common/precompiled.h"
 #include "Debugger.h"
 #include "Cafe/OS/RPL/rpl_structs.h"
 #include "Cemu/PPCAssembler/ppcAssembler.h"
 #include "Cafe/HW/Espresso/Recompiler/PPCRecompiler.h"
 #include "Cemu/ExpressionParser/ExpressionParser.h"
 
-#include "gui/debugger/DebuggerWindow2.h"
-
 #include "Cafe/OS/libs/coreinit/coreinit.h"
+#include "OS/RPL/rpl.h"
+#include "util/helpers/helpers.h"
 
 #if BOOST_OS_WINDOWS
 #include <Windows.h>
 #endif
+
+DebuggerDispatcher g_debuggerDispatcher;
 
 debuggerState_t debuggerState{ };
 
@@ -134,11 +136,6 @@ void debugger_createCodeBreakpoint(uint32 address, uint8 bpType)
 	DebuggerBreakpoint* bp = new DebuggerBreakpoint(address, originalOpcode, bpType, true);
 	debuggerBPChain_add(address, bp);
 	debugger_updateExecutionBreakpoint(address);
-}
-
-void debugger_createExecuteBreakpoint(uint32 address)
-{
-	debugger_createCodeBreakpoint(address, DEBUGGER_BP_T_NORMAL);
 }
 
 namespace coreinit
@@ -294,8 +291,23 @@ void debugger_toggleExecuteBreakpoint(uint32 address)
 	}
 	else
 	{
-		// create new breakpoint
-		debugger_createExecuteBreakpoint(address);
+		// create new execution breakpoint
+		debugger_createCodeBreakpoint(address, DEBUGGER_BP_T_NORMAL);
+	}
+}
+
+void debugger_toggleLoggingBreakpoint(uint32 address)
+{
+	auto existingBP = debugger_getFirstBP(address, DEBUGGER_BP_T_LOGGING);
+	if (existingBP)
+	{
+		// delete existing breakpoint
+		debugger_deleteBreakpoint(existingBP);
+	}
+	else
+	{
+		// create new logging breakpoint
+		debugger_createCodeBreakpoint(address, DEBUGGER_BP_T_LOGGING);
 	}
 }
 
@@ -326,7 +338,7 @@ void debugger_toggleBreakpoint(uint32 address, bool state, DebuggerBreakpoint* b
 			{
 				bp->enabled = state;
 				debugger_updateExecutionBreakpoint(address);
-				debuggerWindow_updateViewThreadsafe2();
+				g_debuggerDispatcher.UpdateViewThreadsafe();
 			}
 			else if (bpItr->isMemBP())
 			{
@@ -348,7 +360,7 @@ void debugger_toggleBreakpoint(uint32 address, bool state, DebuggerBreakpoint* b
 					debugger_updateMemoryBreakpoint(bpItr);
 				else
 					debugger_updateMemoryBreakpoint(nullptr);
-				debuggerWindow_updateViewThreadsafe2();
+				g_debuggerDispatcher.UpdateViewThreadsafe();
 			}
 			return;
 		}
@@ -447,6 +459,34 @@ bool debugger_hasPatch(uint32 address)
 	return false;
 }
 
+void debugger_removePatch(uint32 address)
+{
+	for (sint32 i = 0; i < debuggerState.patches.size(); i++)
+	{
+		auto& patch = debuggerState.patches[i];
+		if (address < patch->address || address >= (patch->address + patch->length))
+			continue;
+		MPTR startAddress = patch->address;
+		MPTR endAddress = patch->address + patch->length;
+		// remove any breakpoints overlapping with the patch
+		for (auto& bp : debuggerState.breakpoints)
+		{
+			if (bp->address + 4 > startAddress && bp->address < endAddress)
+			{
+				bp->enabled = false;
+				debugger_updateExecutionBreakpoint(bp->address);
+			}
+		}
+		// restore original data
+		memcpy(MEMPTR<void>(startAddress).GetPtr(), patch->origData.data(), patch->length);
+		PPCRecompiler_invalidateRange(startAddress, endAddress);
+		// remove patch
+		delete patch;
+		debuggerState.patches.erase(debuggerState.patches.begin() + i);
+		return;
+	}
+}
+
 void debugger_stepInto(PPCInterpreter_t* hCPU, bool updateDebuggerWindow = true)
 {
 	bool isRecEnabled = ppcRecompilerEnabled;
@@ -457,7 +497,7 @@ void debugger_stepInto(PPCInterpreter_t* hCPU, bool updateDebuggerWindow = true)
 	debugger_updateExecutionBreakpoint(initialIP);
 	debuggerState.debugSession.instructionPointer = hCPU->instructionPointer;
 	if(updateDebuggerWindow)
-		debuggerWindow_moveIP();
+		g_debuggerDispatcher.MoveIP();
 	ppcRecompilerEnabled = isRecEnabled;
 }
 
@@ -476,7 +516,7 @@ bool debugger_stepOver(PPCInterpreter_t* hCPU)
 		// nothing to skip, use step-into
 		debugger_stepInto(hCPU);
 		debugger_updateExecutionBreakpoint(initialIP);
-		debuggerWindow_moveIP();
+		g_debuggerDispatcher.MoveIP();
 		ppcRecompilerEnabled = isRecEnabled;
 		return false;
 	}
@@ -484,7 +524,7 @@ bool debugger_stepOver(PPCInterpreter_t* hCPU)
 	debugger_createCodeBreakpoint(initialIP + 4, DEBUGGER_BP_T_ONE_SHOT);
 	// step over current instruction (to avoid breakpoint)
 	debugger_stepInto(hCPU);
-	debuggerWindow_moveIP();
+	g_debuggerDispatcher.MoveIP();
 	// restore breakpoints
 	debugger_updateExecutionBreakpoint(initialIP);
 	// run
@@ -510,7 +550,48 @@ void debugger_enterTW(PPCInterpreter_t* hCPU)
 	{
 		if (bp->bpType == DEBUGGER_BP_T_LOGGING && bp->enabled)
 		{
-			std::string logName = !bp->comment.empty() ? "Breakpoint '"+boost::nowide::narrow(bp->comment)+"'" : fmt::format("Breakpoint at 0x{:08X} (no comment)", bp->address);
+			std::string comment = !bp->comment.empty() ? boost::nowide::narrow(bp->comment) : fmt::format("Breakpoint at 0x{:08X} (no comment)", bp->address);
+
+			auto replacePlaceholders = [&](const std::string& prefix, const auto& formatFunc)
+			{
+				size_t pos = 0;
+				while ((pos = comment.find(prefix, pos)) != std::string::npos)
+				{
+					size_t endPos = comment.find('}', pos);
+					if (endPos == std::string::npos)
+						break;
+
+					try
+					{
+						if (int regNum = ConvertString<int>(comment.substr(pos + prefix.length(), endPos - pos - prefix.length())); regNum >= 0 && regNum < 32)
+						{
+							std::string replacement = formatFunc(regNum);
+							comment.replace(pos, endPos - pos + 1, replacement);
+							pos += replacement.length();
+						}
+						else
+						{
+							pos = endPos + 1;
+						}
+					}
+					catch (...)
+					{
+						pos = endPos + 1;
+					}
+				}
+			};
+
+			// Replace integer register placeholders {rX}
+			replacePlaceholders("{r", [&](int regNum) {
+				return fmt::format("0x{:08X}", hCPU->gpr[regNum]);
+			});
+
+			// Replace floating point register placeholders {fX}
+			replacePlaceholders("{f", [&](int regNum) {
+				return fmt::format("{}", hCPU->fpr[regNum].fpr);
+			});
+
+			std::string logName = "Breakpoint '" + comment + "'";
 			std::string logContext = fmt::format("Thread: {:08x} LR: 0x{:08x}", MEMPTR<OSThread_t>(coreinit::OSGetCurrentThread()).GetMPTR(), hCPU->spr.LR, cemuLog_advancedPPCLoggingEnabled() ? " Stack Trace:" : "");
 			cemuLog_log(LogType::Force, "[Debugger] {} was executed! {}", logName, logContext);
 			if (cemuLog_advancedPPCLoggingEnabled())
@@ -541,13 +622,13 @@ void debugger_enterTW(PPCInterpreter_t* hCPU)
 	DebuggerBreakpoint* singleshotBP = debugger_getFirstBP(debuggerState.debugSession.instructionPointer, DEBUGGER_BP_T_ONE_SHOT);
 	if (singleshotBP)
 		debugger_deleteBreakpoint(singleshotBP);
-	debuggerWindow_notifyDebugBreakpointHit2();
-	debuggerWindow_updateViewThreadsafe2();
+	g_debuggerDispatcher.NotifyDebugBreakpointHit();
+	g_debuggerDispatcher.UpdateViewThreadsafe();
 	// reset step control
 	debuggerState.debugSession.stepInto = false;
 	debuggerState.debugSession.stepOver = false;
 	debuggerState.debugSession.run = false;
-	while (true)
+	while (debuggerState.debugSession.isTrapped)
 	{
 		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 		// check for step commands
@@ -559,14 +640,14 @@ void debugger_enterTW(PPCInterpreter_t* hCPU)
 				break; // if true is returned, continue with execution
 			}
 			debugger_createPPCStateSnapshot(hCPU);
-			debuggerWindow_updateViewThreadsafe2();
+			g_debuggerDispatcher.UpdateViewThreadsafe();
 			debuggerState.debugSession.stepOver = false;
 		}
 		if (debuggerState.debugSession.stepInto)
 		{
 			debugger_stepInto(hCPU);
 			debugger_createPPCStateSnapshot(hCPU);
-			debuggerWindow_updateViewThreadsafe2();
+			g_debuggerDispatcher.UpdateViewThreadsafe();
 			debuggerState.debugSession.stepInto = false;
 			continue;
 		}
@@ -583,8 +664,8 @@ void debugger_enterTW(PPCInterpreter_t* hCPU)
 
 	debuggerState.debugSession.isTrapped = false;
 	debuggerState.debugSession.hCPU = nullptr;
-	debuggerWindow_updateViewThreadsafe2();
-	debuggerWindow_notifyRun();
+	g_debuggerDispatcher.UpdateViewThreadsafe();
+	g_debuggerDispatcher.NotifyRun();
 }
 
 void debugger_shouldBreak(PPCInterpreter_t* hCPU)

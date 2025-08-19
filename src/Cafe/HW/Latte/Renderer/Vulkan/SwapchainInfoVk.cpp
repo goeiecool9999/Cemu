@@ -1,7 +1,7 @@
 #include "SwapchainInfoVk.h"
 
 #include "config/CemuConfig.h"
-#include "gui/guiWrapper.h"
+#include "WindowSystem.h"
 #include "Cafe/HW/Latte/Core/Latte.h"
 #include "Cafe/HW/Latte/Core/LatteTiming.h"
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanAPI.h"
@@ -9,7 +9,7 @@
 
 SwapchainInfoVk::SwapchainInfoVk(bool mainWindow, Vector2i size) : mainWindow(mainWindow), m_desiredExtent(size)
 {
-	auto& windowHandleInfo = mainWindow ? gui_getWindowInfo().canvas_main : gui_getWindowInfo().canvas_pad;
+	auto& windowHandleInfo = mainWindow ? WindowSystem::GetWindowInfo().canvas_main : WindowSystem::GetWindowInfo().canvas_pad;
 	auto renderer = VulkanRenderer::GetInstance();
 	m_instance = renderer->GetVkInstance();
 	m_logicalDevice = renderer->GetLogicalDevice();
@@ -60,7 +60,7 @@ void SwapchainInfoVk::Create()
 	VkAttachmentDescription colorAttachment = {};
 	colorAttachment.format = m_surfaceFormat.format;
 	colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 	colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;

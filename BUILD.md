@@ -20,6 +20,9 @@
    - [Installing Tool Dependencies](#installing-tool-dependencies)
    - [Installing Library Dependencies](#installing-library-dependencies)
    - [Build Cemu using CMake](#build-cemu-using-cmake)
+- [FreeBSD](#freebsd)
+	- [Installing Dependencies](#installing-dependencies)
+	- [Build Cemu on BSD with CMake](#build-cemu-on-bsd-with-cmake)
 - [Updating Cemu and source code](#updating-cemu-and-source-code)
 
 ## Windows
@@ -46,10 +49,10 @@ To compile Cemu, a recent enough compiler and STL with C++20 support is required
 ### Dependencies
 
 #### For Arch and derivatives:
-`sudo pacman -S --needed base-devel clang cmake freeglut git glm gtk3 libgcrypt libpulse libsecret linux-headers llvm nasm ninja systemd unzip zip`
+`sudo pacman -S --needed base-devel bluez-libs clang cmake freeglut git glm gtk3 libgcrypt libpulse libsecret linux-headers llvm nasm ninja systemd unzip zip`
 
 #### For Debian, Ubuntu and derivatives:
-`sudo apt install -y cmake curl clang-15 freeglut3-dev git libgcrypt20-dev libglm-dev libgtk-3-dev libpulse-dev libsecret-1-dev libsystemd-dev libtool nasm ninja-build`
+`sudo apt install -y cmake curl clang-15 freeglut3-dev git libbluetooth-dev libgcrypt20-dev libglm-dev libgtk-3-dev libpulse-dev libsecret-1-dev libsystemd-dev libtool nasm ninja-build`
 
 You may also need to install `libusb-1.0-0-dev` as a workaround for an issue with the vcpkg hidapi package.
 
@@ -57,7 +60,7 @@ At Step 3 in [Build Cemu using cmake and clang](#build-cemu-using-cmake-and-clan
    `cmake -S . -B build -DCMAKE_BUILD_TYPE=release -DCMAKE_C_COMPILER=/usr/bin/clang-15 -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 -G Ninja -DCMAKE_MAKE_PROGRAM=/usr/bin/ninja`
 
 #### For Fedora and derivatives:
-`sudo dnf install clang cmake cubeb-devel freeglut-devel git glm-devel gtk3-devel kernel-headers libgcrypt-devel libsecret-devel libtool libusb1-devel llvm nasm ninja-build perl-core systemd-devel zlib-devel zlib-static`
+`sudo dnf install bluez-libs-devel clang cmake cubeb-devel freeglut-devel git glm-devel gtk3-devel kernel-headers libgcrypt-devel libsecret-devel libtool libusb1-devel llvm nasm ninja-build perl-core systemd-devel wayland-protocols-devel zlib-devel zlib-static`
 
 ### Build Cemu
 
@@ -120,6 +123,9 @@ This section refers to running `cmake -S...` (truncated).
 * Compiling failed during rebuild after `git pull` with an error that mentions RPATH
    * Add the following and try running the command again:
       * `-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON`
+* Environment variable `VCPKG_FORCE_SYSTEM_BINARIES` must be set.
+   * Execute the folowing and then try running the command again:
+      * `export VCPKG_FORCE_SYSTEM_BINARIES=1`
 * If you are getting a random error, read the [package-name-and-platform]-out.log and [package-name-and-platform]-err.log for the actual reason to see if you might be lacking the headers from a dependency.
 
 
@@ -182,6 +188,33 @@ Then install the dependencies:
 #### Troubleshooting steps
 - If step 3 gives you an error about not being able to find ninja, try appending `-DCMAKE_MAKE_PROGRAM=/usr/local/bin/ninja` to the command and running it again.
 
+## FreeBSD
+
+The following instructions to build Cemu on FreeBSD are experimental. Some features available on other platforms are not available on FreeBSD (discord rich presence, bluetooth/support for actual Wii U controllers, auto-updates, etc.)
+
+To compile Cemu, a recent enough compiler and STL with C++20 support is required! Clang-15 or higher is what we recommend. Any version of FreeBSD 13.3-RELEASE or higher comes bundled with LLVM > version 15 as part of the base system. However, if for whatever reason your system lacks a recent version of LLVM you can install one by executing:
+
+`sudo pkg install llvm15`
+
+Or a higher version as desired.
+
+### Installing Dependencies
+
+`sudo pkg install boost-libs cmake-core curl glslang gtk3 libzip ninja png pkgconf pugixml rapidjson sdl2 wayland wayland-protocols wx32-gtk3 xorg zstd`
+
+### Build Cemu on BSD with CMake
+
+```
+git clone --recursive https://github.com/cemu-project/Cemu
+cd Cemu
+cmake -B build -DCMAKE_BUILD_TYPE=release -DENABLE_BLUEZ=OFF -DENABLE_DISCORD_RPC=OFF -DENABLE_FERAL_GAMEMODE=OFF -DENABLE_HIDAPI=OFF -DENABLE_VCPKG=OFF -G Ninja
+cmake --build build
+
+cd build && ninja install
+```
+
+You should now have a Cemu executable file in the /bin folder, which you can run using `./bin/Cemu_release`.
+
 ## Updating Cemu and source code
 1. To update your Cemu local repository, use the command `git pull --recurse-submodules` (run this command on the Cemu root).
     - This should update your local copy of Cemu and all of its dependencies.
@@ -189,3 +222,41 @@ Then install the dependencies:
 
 If CMake complains about Cemu already being compiled or another similar error, try deleting the `CMakeCache.txt` file inside the `build` folder and retry building.
 
+## CMake configure flags
+Some flags can be passed during CMake configure to customise which features are enabled on build.
+
+Example usage: `cmake -S . -B build -DCMAKE_BUILD_TYPE=release -DENABLE_SDL=ON -DENABLE_VULKAN=OFF`
+
+### All platforms
+| Flag               |   | Description                                                                 | Default | Note               |
+|--------------------|:--|-----------------------------------------------------------------------------|---------|--------------------|
+| ALLOW_PORTABLE     |   | Allow Cemu to use the `portable` directory to store configs and data        | ON      |                    |
+| CEMU_CXX_FLAGS     |   | Flags passed straight to the compiler, e.g. `-march=native`, `-Wall`, `/W3` | ""      |                    |
+| ENABLE_CUBEB       |   | Enable cubeb audio backend                                                  | ON      |                    |
+| ENABLE_DISCORD_RPC |   | Enable Discord Rich presence support                                        | ON      |                    |
+| ENABLE_OPENGL      |   | Enable OpenGL graphics backend                                              | ON      | Currently required |
+| ENABLE_HIDAPI      |   | Enable HIDAPI (used for Wiimote controller API)                             | ON      |                    |
+| ENABLE_SDL         |   | Enable SDLController controller API                                         | ON      | Currently required |
+| ENABLE_VCPKG       |   | Use VCPKG package manager to obtain dependencies                            | ON      |                    |
+| ENABLE_VULKAN      |   | Enable the Vulkan graphics backend                                          | ON      |                    |
+| ENABLE_WXWIDGETS   |   | Enable wxWidgets UI                                                         | ON      | Currently required |
+
+### Windows
+| Flag               | Description                       | Default | Note               |
+|--------------------|-----------------------------------|---------|--------------------|
+| ENABLE_DIRECTAUDIO | Enable DirectAudio audio backend  | ON      | Currently required |
+| ENABLE_DIRECTINPUT | Enable DirectInput controller API | ON      | Currently required |
+| ENABLE_XAUDIO      | Enable XAudio audio backend       | ON      |                    |
+| ENABLE_XINPUT      | Enable XInput controller API      | ON      |                    |
+
+### Linux
+| Flag                  | Description                                        | Default |
+|-----------------------|----------------------------------------------------|---------|
+| ENABLE_BLUEZ          | Build with Bluez (used for Wiimote controller API) | ON      |
+| ENABLE_FERAL_GAMEMODE | Enable Feral Interactive GameMode support          | ON      |
+| ENABLE_WAYLAND        | Enable Wayland support                             | ON      |
+
+### macOS
+| Flag         | Description                                    | Default |
+|--------------|------------------------------------------------|---------|
+| MACOS_BUNDLE | MacOS executable will be an application bundle | OFF     |

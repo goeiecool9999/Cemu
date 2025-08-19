@@ -11,6 +11,8 @@
 #include "util/IniParser/IniParser.h"
 #include "util/helpers/StringHelpers.h"
 #include "Cafe/CafeSystem.h"
+#include "HW/Espresso/Debugger/Debugger.h"
+
 #include <cinttypes>
 
 std::vector<GraphicPackPtr> GraphicPack2::s_graphic_packs;
@@ -85,7 +87,7 @@ bool GraphicPack2::LoadGraphicPack(const fs::path& rulesPath, IniParser& rules)
 		auto gp = std::make_shared<GraphicPack2>(rulesPath, rules);
 
 		// check if enabled and preset set
-		const auto& config_entries = g_config.data().graphic_pack_entries;
+		const auto& config_entries = GetConfigHandle().data().graphic_pack_entries;
 
 		// legacy absolute path checking for not breaking compatibility
 		auto file = gp->GetRulesPath();
@@ -130,6 +132,7 @@ bool GraphicPack2::ActivateGraphicPack(const std::shared_ptr<GraphicPack2>& grap
 	if (graphic_pack->Activate())
 	{
 		s_active_graphic_packs.push_back(graphic_pack);
+		g_debuggerDispatcher.NotifyGraphicPacksModified();
 		return true;
 	}
 
@@ -153,6 +156,7 @@ bool GraphicPack2::DeactivateGraphicPack(const std::shared_ptr<GraphicPack2>& gr
 
 	graphic_pack->Deactivate();
 	s_active_graphic_packs.erase(it);
+	g_debuggerDispatcher.NotifyGraphicPacksModified();
 	return true;
 }
 
@@ -345,7 +349,7 @@ GraphicPack2::GraphicPack2(fs::path rulesPath, IniParser& rules)
 			const auto preset_name = rules.FindOption("name");
 			if (!preset_name)
 			{
-				cemuLog_log(LogType::Force, "Graphic pack \"{}\": Preset in line {} skipped because it has no name option defined", m_name, rules.GetCurrentSectionLineNumber());
+				cemuLog_log(LogType::Force, "Graphic pack \"{}\": Preset in line {} skipped because it has no name option defined", GetNormalizedPathString(), rules.GetCurrentSectionLineNumber());
 				continue;
 			}
 			
@@ -369,7 +373,7 @@ GraphicPack2::GraphicPack2(fs::path rulesPath, IniParser& rules)
 			}
 			catch (const std::exception & ex)
 			{
-				cemuLog_log(LogType::Force, "Graphic pack \"{}\": Can't parse preset \"{}\": {}", m_name, *preset_name, ex.what());
+				cemuLog_log(LogType::Force, "Graphic pack \"{}\": Can't parse preset \"{}\": {}", GetNormalizedPathString(), *preset_name, ex.what());
 			}
 		}
 		else if (boost::iequals(currentSectionName, "RAM"))
@@ -383,7 +387,7 @@ GraphicPack2::GraphicPack2(fs::path rulesPath, IniParser& rules)
 				{
 					if (m_version <= 5)
 					{
-						cemuLog_log(LogType::Force, "Graphic pack \"{}\": [RAM] options are only available for graphic pack version 6 or higher", m_name, optionNameBuf);
+						cemuLog_log(LogType::Force, "Graphic pack \"{}\": [RAM] options are only available for graphic pack version 6 or higher", GetNormalizedPathString(), optionNameBuf);
 						throw std::exception();
 					}
 
@@ -393,12 +397,12 @@ GraphicPack2::GraphicPack2(fs::path rulesPath, IniParser& rules)
 					{
 						if (addrEnd <= addrStart)
 						{
-							cemuLog_log(LogType::Force, "Graphic pack \"{}\": start address (0x{:08x}) must be greater than end address (0x{:08x}) for {}", m_name, addrStart, addrEnd, optionNameBuf);
+							cemuLog_log(LogType::Force, "Graphic pack \"{}\": start address (0x{:08x}) must be greater than end address (0x{:08x}) for {}", GetNormalizedPathString(), addrStart, addrEnd, optionNameBuf);
 							throw std::exception();
 						}
 						else if ((addrStart & 0xFFF) != 0 || (addrEnd & 0xFFF) != 0)
 						{
-							cemuLog_log(LogType::Force, "Graphic pack \"{}\": addresses for %s are not aligned to 0x1000", m_name, optionNameBuf);
+							cemuLog_log(LogType::Force, "Graphic pack \"{}\": addresses for %s are not aligned to 0x1000", GetNormalizedPathString(), optionNameBuf);
 							throw std::exception();
 						}
 						else
@@ -408,7 +412,7 @@ GraphicPack2::GraphicPack2(fs::path rulesPath, IniParser& rules)
 					}
 					else
 					{
-						cemuLog_log(LogType::Force, "Graphic pack \"{}\": has invalid syntax for option {}", m_name, optionNameBuf);
+						cemuLog_log(LogType::Force, "Graphic pack \"{}\": has invalid syntax for option {}", GetNormalizedPathString(), optionNameBuf);
 						throw std::exception();
 					}
 				}
@@ -422,22 +426,30 @@ GraphicPack2::GraphicPack2(fs::path rulesPath, IniParser& rules)
 		std::unordered_map<std::string, std::vector<PresetPtr>> tmp_map;
 		
 		// all vars must be defined in the default preset vars before
-		for (const auto& entry : m_presets)
+		std::vector<std::pair<std::string, std::string>> mismatchingPresetVars;
+		for (const auto& presetEntry : m_presets)
 		{
-			tmp_map[entry->category].emplace_back(entry);
+			tmp_map[presetEntry->category].emplace_back(presetEntry);
 			
-			for (auto& kv : entry->variables)
+			for (auto& presetVar : presetEntry->variables)
 			{
-				const auto it = m_preset_vars.find(kv.first);
+				const auto it = m_preset_vars.find(presetVar.first);
 				if (it == m_preset_vars.cend())
 				{
-					cemuLog_log(LogType::Force, "Graphic pack: \"{}\" contains preset variables which are not defined in the default section", m_name);
-					throw std::exception();
+					mismatchingPresetVars.emplace_back(presetEntry->name, presetVar.first);
+					continue;
 				}
-
 				// overwrite var type with default var type
-				kv.second.first = it->second.first;
+				presetVar.second.first = it->second.first;
 			}
+		}
+
+		if(!mismatchingPresetVars.empty())
+		{
+			cemuLog_log(LogType::Force, "Graphic pack \"{}\" contains preset variables which are not defined in the [Default] section:", GetNormalizedPathString());
+			for (const auto& [presetName, varName] : mismatchingPresetVars)
+				cemuLog_log(LogType::Force, "Preset: {} Variable: {}", presetName, varName);
+			throw std::exception();
 		}
 
 		// have first entry be default active for every category if no default= is set
@@ -469,7 +481,7 @@ GraphicPack2::GraphicPack2(fs::path rulesPath, IniParser& rules)
 				auto& p2 = kv.second[i + 1];
 				if (p1->variables.size() != p2->variables.size())
 				{
-					cemuLog_log(LogType::Force, "Graphic pack: \"{}\" contains inconsistent preset variables", m_name);
+					cemuLog_log(LogType::Force, "Graphic pack: \"{}\" contains inconsistent preset variables", GetNormalizedPathString());
 					throw std::exception();
 				}
 
@@ -477,14 +489,14 @@ GraphicPack2::GraphicPack2(fs::path rulesPath, IniParser& rules)
 				std::set<std::string> keys2(get_keys(p2->variables).begin(), get_keys(p2->variables).end());
 				if (keys1 != keys2)
 				{
-					cemuLog_log(LogType::Force, "Graphic pack: \"{}\" contains inconsistent preset variables", m_name);
+					cemuLog_log(LogType::Force, "Graphic pack: \"{}\" contains inconsistent preset variables", GetNormalizedPathString());
 					throw std::exception();
 				}
 
 				if(p1->is_default)
 				{
 					if(has_default)
-						cemuLog_log(LogType::Force, "Graphic pack: \"{}\" has more than one preset with the default key set for the same category \"{}\"", m_name, p1->name);
+						cemuLog_log(LogType::Force, "Graphic pack: \"{}\" has more than one preset with the default key set for the same category \"{}\"", GetNormalizedPathString(), p1->name);
 					p1->active = true;
 					has_default = true;
 				}
@@ -813,7 +825,7 @@ void GraphicPack2::AddConstantsForCurrentPreset(ExpressionParser& ep)
 	}
 }
 
-void GraphicPack2::_iterateReplacedFiles(const fs::path& currentPath, bool isAOC)
+void GraphicPack2::_iterateReplacedFiles(const fs::path& currentPath, bool isAOC, const char* virtualMountBase)
 {
 	uint64 currentTitleId = CafeSystem::GetForegroundTitleId();
 	uint64 aocTitleId = (currentTitleId & 0xFFFFFFFFull) | 0x0005000c00000000ull;
@@ -828,7 +840,7 @@ void GraphicPack2::_iterateReplacedFiles(const fs::path& currentPath, bool isAOC
 			}
 			else
 			{
-				virtualMountPath = fs::path("vol/content/") / virtualMountPath;
+				virtualMountPath = fs::path(virtualMountBase) / virtualMountPath;
 			}
 			fscDeviceRedirect_add(virtualMountPath.generic_string(), it.file_size(), it.path().generic_string(), m_fs_priority);
 		}		
@@ -853,7 +865,7 @@ void GraphicPack2::LoadReplacedFiles()
 	{
 		// setup redirections	
 		fscDeviceRedirect_map();
-		_iterateReplacedFiles(contentPath, false);
+		_iterateReplacedFiles(contentPath, false, "vol/content/");
 	}
 	// /aoc/
 	fs::path aocPath(gfxPackPath);
@@ -866,7 +878,18 @@ void GraphicPack2::LoadReplacedFiles()
 		aocTitleId |= 0x0005000c00000000ULL;
 		// setup redirections	
 		fscDeviceRedirect_map();
-		_iterateReplacedFiles(aocPath, true);
+		_iterateReplacedFiles(aocPath, true, nullptr);
+	}
+	
+	// /code/
+	fs::path codePath(gfxPackPath);
+	codePath.append("code");
+	
+	if (fs::exists(codePath, ec))
+	{
+	    // setup redirections
+		fscDeviceRedirect_map();
+		_iterateReplacedFiles(codePath, false, CafeSystem::GetInternalVirtualCodeFolder().c_str());
 	}
 }
 
@@ -960,7 +983,7 @@ bool GraphicPack2::Activate()
 				auto option_upscale = rules.FindOption("upscaleMagFilter");
 				if(option_upscale && boost::iequals(*option_upscale, "NearestNeighbor"))
 					m_output_settings.upscale_filter = LatteTextureView::MagFilter::kNearestNeighbor;
-				auto option_downscale = rules.FindOption("NearestNeighbor");
+				auto option_downscale = rules.FindOption("downscaleMinFilter");
 				if (option_downscale && boost::iequals(*option_downscale, "NearestNeighbor"))
 					m_output_settings.downscale_filter = LatteTextureView::MagFilter::kNearestNeighbor;
 			}

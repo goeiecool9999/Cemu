@@ -15,6 +15,75 @@
 #define DEBUGGER_BP_T_GDBSTUB_TW    0x7C010008
 #define DEBUGGER_BP_T_DEBUGGER_TW   0x7C020008
 
+class DebuggerCallbacks
+{
+  public:
+	virtual void UpdateViewThreadsafe() {}
+	virtual void NotifyDebugBreakpointHit() {}
+	virtual void NotifyRun() {}
+	virtual void MoveIP() {}
+	virtual void NotifyModuleLoaded(void* module) {}
+	virtual void NotifyModuleUnloaded(void* module) {}
+	virtual void NotifyGraphicPacksModified() {}
+	virtual ~DebuggerCallbacks() = default;
+};
+
+class DebuggerDispatcher
+{
+  private:
+	static inline class DefaultDebuggerCallbacks : public DebuggerCallbacks
+	{
+	} s_defaultDebuggerCallbacks;
+	DebuggerCallbacks* m_callbacks = &s_defaultDebuggerCallbacks;
+
+  public:
+	void SetDebuggerCallbacks(DebuggerCallbacks* debuggerCallbacks)
+	{
+		cemu_assert_debug(m_callbacks == &s_defaultDebuggerCallbacks);
+		m_callbacks = debuggerCallbacks;
+	}
+
+	void ClearDebuggerCallbacks()
+	{
+		cemu_assert_debug(m_callbacks != &s_defaultDebuggerCallbacks);
+		m_callbacks = &s_defaultDebuggerCallbacks;
+	}
+
+	void UpdateViewThreadsafe()
+	{
+		m_callbacks->UpdateViewThreadsafe();
+	}
+
+	void NotifyDebugBreakpointHit()
+	{
+		m_callbacks->NotifyDebugBreakpointHit();
+	}
+
+	void NotifyRun()
+	{
+		m_callbacks->NotifyRun();
+	}
+
+	void MoveIP()
+	{
+		m_callbacks->MoveIP();
+	}
+
+	void NotifyModuleLoaded(void* module)
+	{
+		m_callbacks->NotifyModuleLoaded(module);
+	}
+
+	void NotifyModuleUnloaded(void* module)
+	{
+		m_callbacks->NotifyModuleUnloaded(module);
+	}
+
+	void NotifyGraphicPacksModified()
+	{
+		m_callbacks->NotifyGraphicPacksModified();
+	}
+} extern g_debuggerDispatcher;
 
 struct DebuggerBreakpoint
 {
@@ -100,8 +169,8 @@ extern debuggerState_t debuggerState;
 // new API
 DebuggerBreakpoint* debugger_getFirstBP(uint32 address);
 void debugger_createCodeBreakpoint(uint32 address, uint8 bpType);
-void debugger_createExecuteBreakpoint(uint32 address);
 void debugger_toggleExecuteBreakpoint(uint32 address); // create/remove execute breakpoint
+void debugger_toggleLoggingBreakpoint(uint32 address); // create/remove logging breakpoint
 void debugger_toggleBreakpoint(uint32 address, bool state, DebuggerBreakpoint* bp);
 
 void debugger_createMemoryBreakpoint(uint32 address, bool onRead, bool onWrite);
@@ -114,6 +183,7 @@ void debugger_updateExecutionBreakpoint(uint32 address, bool forceRestore = fals
 
 void debugger_createPatch(uint32 address, std::span<uint8> patchData);
 bool debugger_hasPatch(uint32 address);
+void debugger_removePatch(uint32 address);
 
 void debugger_forceBreak(); // force breakpoint at the next possible instruction
 bool debugger_isTrapped();

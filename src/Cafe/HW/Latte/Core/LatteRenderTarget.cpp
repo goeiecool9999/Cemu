@@ -11,8 +11,7 @@
 #include "Cafe/HW/Latte/Core/LattePerformanceMonitor.h"
 #include "Cafe/GraphicPack/GraphicPack2.h"
 #include "config/ActiveSettings.h"
-#include "Cafe/HW/Latte/Renderer/Vulkan/VulkanRenderer.h"
-#include "gui/guiWrapper.h"
+#include "WindowSystem.h"
 #include "Cafe/OS/libs/erreula/erreula.h"
 #include "input/InputManager.h"
 #include "Cafe/OS/libs/swkbd/swkbd.h"
@@ -839,10 +838,10 @@ sint32 _currentOutputImageHeight = 0;
 void LatteRenderTarget_getScreenImageArea(sint32* x, sint32* y, sint32* width, sint32* height, sint32* fullWidth, sint32* fullHeight, bool padView)
 {
 	int w, h;
-	if(padView && gui_isPadWindowOpen())
-		gui_getPadWindowPhysSize(w, h);
+	if(padView && WindowSystem::IsPadWindowOpen())
+		WindowSystem::GetPadWindowPhysSize(w, h);
 	else
-		gui_getWindowPhysSize(w, h);
+		WindowSystem::GetWindowPhysSize(w, h);
 
 	sint32 scaledOutputX;
 	sint32 scaledOutputY;
@@ -933,13 +932,6 @@ void LatteRenderTarget_copyToBackbuffer(LatteTextureView* textureView, bool isPa
 	if (shader == nullptr)
 	{
 		sint32 scaling_filter = downscaling ? GetConfig().downscale_filter : GetConfig().upscale_filter;
-		
-		if (g_renderer->GetType() == RendererAPI::Vulkan)
-		{
-			// force linear or nearest neighbor filter
-			if(scaling_filter != kLinearFilter && scaling_filter != kNearestNeighborFilter)
-				scaling_filter = kLinearFilter;
-		}
 
 		if (scaling_filter == kLinearFilter)
 		{
@@ -957,7 +949,7 @@ void LatteRenderTarget_copyToBackbuffer(LatteTextureView* textureView, bool isPa
 			else
 				shader = RendererOutputShader::s_bicubic_shader;
 
-			filter = LatteTextureView::MagFilter::kNearestNeighbor;
+			filter = LatteTextureView::MagFilter::kLinear;
 		}
 		else if (scaling_filter == kBicubicHermiteFilter)
 		{
@@ -1007,8 +999,8 @@ void LatteRenderTarget_itHLECopyColorBufferToScanBuffer(MPTR colorBufferPtr, uin
 		return {pressed && !toggle, pressed && toggle};
 	};
 
-	const bool tabPressed = gui_isKeyDown(PlatformKeyCodes::TAB);
-	const bool ctrlPressed = gui_isKeyDown(PlatformKeyCodes::LCONTROL);
+	const bool tabPressed = WindowSystem::IsKeyDown(WindowSystem::PlatformKeyCodes::TAB);
+	const bool ctrlPressed = WindowSystem::IsKeyDown(WindowSystem::PlatformKeyCodes::LCONTROL);
 	const auto [vpad0Active, vpad0Toggle] = getVPADScreenActive(0);
 	const auto [vpad1Active, vpad1Toggle] = getVPADScreenActive(1);
 

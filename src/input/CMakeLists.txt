@@ -61,7 +61,7 @@ if(WIN32)
 	)
 endif()
 
-if (ENABLE_WIIMOTE)
+if (SUPPORTS_WIIMOTE)
 	target_compile_definitions(CemuInput PUBLIC SUPPORTS_WIIMOTE)
 	target_sources(CemuInput PRIVATE
 			api/Wiimote/WiimoteControllerProvider.h
@@ -70,9 +70,18 @@ if (ENABLE_WIIMOTE)
 			api/Wiimote/NativeWiimoteController.h
 			api/Wiimote/NativeWiimoteController.cpp
 			api/Wiimote/WiimoteDevice.h
-			api/Wiimote/hidapi/HidapiWiimote.cpp
-			api/Wiimote/hidapi/HidapiWiimote.h
 	)
+	if (ENABLE_HIDAPI)
+		target_sources(CemuInput PRIVATE
+				api/Wiimote/hidapi/HidapiWiimote.cpp
+				api/Wiimote/hidapi/HidapiWiimote.h)
+	endif ()
+
+	if (ENABLE_BLUEZ)
+		target_sources(CemuInput PRIVATE
+				api/Wiimote/l2cap/L2CapWiimote.cpp
+				api/Wiimote/l2cap/L2CapWiimote.h)
+	endif()
 endif ()
 
 
@@ -90,10 +99,11 @@ target_link_libraries(CemuInput PRIVATE
 	pugixml::pugixml
 	SDL2::SDL2
 )
+
 if (ENABLE_HIDAPI)
 	target_link_libraries(CemuInput PRIVATE hidapi::hidapi)
 endif()
 
-if (ENABLE_WXWIDGETS)
-	target_link_libraries(CemuInput PRIVATE wx::base wx::core)
-endif()
+if (ENABLE_BLUEZ)
+	target_link_libraries(CemuInput PRIVATE bluez::bluez)
+endif ()

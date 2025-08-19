@@ -8,7 +8,7 @@
 
 #include <glslang/Public/ShaderLang.h>
 #include <glslang/SPIRV/GlslangToSpv.h>
-#include <util/helpers/helpers.h>
+#include "util/helpers/helpers.h"
 
 bool s_isLoadingShadersVk{ false };
 class FileCache* s_spirvCache{nullptr};
@@ -211,6 +211,9 @@ RendererShaderVk::~RendererShaderVk()
 {
 	while (!list_pipelineInfo.empty())
 		delete list_pipelineInfo[0];
+
+	VkDevice vkDev = VulkanRenderer::GetInstance()->GetLogicalDevice();
+	vkDestroyShaderModule(vkDev, m_shader_module, nullptr);
 }
 
 void RendererShaderVk::Init()

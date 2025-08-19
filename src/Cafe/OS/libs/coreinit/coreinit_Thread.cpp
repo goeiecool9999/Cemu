@@ -25,7 +25,11 @@ void nnNfp_update();
 
 namespace coreinit
 {
+#ifdef __arm64__
+	void __OSFiberThreadEntry(uint32, uint32);
+#else
 	void __OSFiberThreadEntry(void* thread);
+#endif
 	void __OSAddReadyThreadToRunQueue(OSThread_t* thread);
 	void __OSRemoveThreadFromRunQueues(OSThread_t* thread);
 };
@@ -49,7 +53,7 @@ namespace coreinit
 
 	struct OSHostThread
 	{
-		OSHostThread(OSThread_t* thread) : m_thread(thread), m_fiber(__OSFiberThreadEntry, this, this)
+		OSHostThread(OSThread_t* thread) : m_thread(thread), m_fiber((void(*)(void*))__OSFiberThreadEntry, this, this)
 		{
 		}
 
@@ -655,7 +659,7 @@ namespace coreinit
 		StackAllocator<OSThreadQueue> _threadQueue;
 		OSInitThreadQueue(_threadQueue.GetPointer());
 		__OSLockScheduler();
-		OSHostAlarm* hostAlarm = OSHostAlarmCreate(coreinit_getOSTime() + ticks, 0, _OSSleepTicks_alarmHandler, _threadQueue.GetPointer());
+		OSHostAlarm* hostAlarm = OSHostAlarmCreate(OSGetTime() + ticks, 0, _OSSleepTicks_alarmHandler, _threadQueue.GetPointer());
 		_threadQueue.GetPointer()->queueAndWait(OSGetCurrentThread());
 		OSHostAlarmDestroy(hostAlarm);
 		__OSUnlockScheduler();
@@ -713,7 +717,10 @@ namespace coreinit
 		thread->id = 0x8000;
 
 		if (!thread->deallocatorFunc.IsNull())
+		{
 			__OSQueueThreadDeallocation(thread);
+			PPCCore_switchToSchedulerWithLock(); // make sure the deallocation function runs before we return
+		}
 
 		__OSUnlockScheduler();
 
@@ -1114,13 +1121,13 @@ namespace coreinit
 		thread->requestFlags = (OSThread_t::REQUEST_FLAG_BIT)(thread->requestFlags & OSThread_t::REQUEST_FLAG_CANCEL); // remove all flags except cancel flag
 
 		// update total cycles
-		uint64 remainingCycles = std::min((uint64)hCPU->remainingCycles, (uint64)thread->quantumTicks);
-		uint64 executedCycles = thread->quantumTicks - remainingCycles;
-		if (executedCycles < hCPU->skippedCycles)
+		sint64 executedCycles = (sint64)thread->quantumTicks - (sint64)hCPU->remainingCycles;
+		executedCycles = std::max<sint64>(executedCycles, 0);
+		if (executedCycles < (sint64)hCPU->skippedCycles)
 			executedCycles = 0;
 		else
 			executedCycles -= hCPU->skippedCycles;
-		thread->totalCycles += executedCycles;
+		thread->totalCycles += (uint64)executedCycles;
 		// store context and set current thread to null
 		__OSThreadStoreContext(hCPU, thread);
 		OSSetCurrentThread(OSGetCoreId(), nullptr);
@@ -1304,8 +1311,14 @@ namespace coreinit
 		__OSThreadStartTimeslice(hostThread->m_thread, &hostThread->ppcInstance);
 	}
 
+#ifdef __arm64__
+	void __OSFiberThreadEntry(uint32 _high, uint32 _low)
+	{
+		uint64 _thread = (uint64) _high << 32 | _low;
+#else
 	void __OSFiberThreadEntry(void* _thread)
 	{
+#endif
 		OSHostThread* hostThread = (OSHostThread*)_thread;
 
         #if defined(ARCH_X86_64)
@@ -1515,7 +1528,7 @@ namespace coreinit
 	}
 
 	// queue thread deallocation to run after current thread finishes
-	// the termination threads run at a higher priority on the same threads
+	// the termination threads run at a higher priority on the same core
 	void __OSQueueThreadDeallocation(OSThread_t* thread)
 	{
 		uint32 coreIndex = OSGetCoreId();

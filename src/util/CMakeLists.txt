@@ -1,5 +1,7 @@
 add_library(CemuUtil
   boost/bluetooth.h
+  bootSound/BootSoundReader.cpp
+  bootSound/BootSoundReader.h
   ChunkedHeap/ChunkedHeap.h
   containers/flat_hash_map.hpp
   containers/IntervalBucketContainer.h
@@ -96,7 +98,3 @@ target_link_libraries(CemuUtil PRIVATE
 	Boost::nowide
 	OpenSSL::Crypto
 )
-
-if (ENABLE_WXWIDGETS)
-	target_link_libraries(CemuUtil PRIVATE wx::base wx::core)
-endif()

@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.21.1)
 
 option(ENABLE_VCPKG "Enable the vcpkg package manager" ON)
 option(MACOS_BUNDLE "The executable when built on macOS will be created as an application bundle" OFF)
+option(ALLOW_PORTABLE "Allow Cemu to be run in portable mode" ON)
 
 # used by CI script to set version:
 set(EMULATOR_VERSION_MAJOR "0" CACHE STRING "")
@@ -36,11 +37,11 @@ if (ENABLE_VCPKG)
 	endif()
 
 	if(UNIX AND NOT APPLE)
-		set(VCPKG_OVERLAY_PORTS "${CMAKE_CURRENT_LIST_DIR}/dependencies/vcpkg_overlay_ports_linux")
+		set(VCPKG_OVERLAY_PORTS "${CMAKE_CURRENT_LIST_DIR}/dependencies/vcpkg_overlay_ports_linux;${CMAKE_CURRENT_LIST_DIR}/dependencies/vcpkg_overlay_ports")
 	elseif(APPLE)
-		set(VCPKG_OVERLAY_PORTS "${CMAKE_CURRENT_LIST_DIR}/dependencies/vcpkg_overlay_ports_mac")
+		set(VCPKG_OVERLAY_PORTS "${CMAKE_CURRENT_LIST_DIR}/dependencies/vcpkg_overlay_ports_mac;${CMAKE_CURRENT_LIST_DIR}/dependencies/vcpkg_overlay_ports")
 	else()
-		set(VCPKG_OVERLAY_PORTS "${CMAKE_CURRENT_LIST_DIR}/dependencies/vcpkg_overlay_ports")
+		set(VCPKG_OVERLAY_PORTS "${CMAKE_CURRENT_LIST_DIR}/dependencies/vcpkg_overlay_ports_win;${CMAKE_CURRENT_LIST_DIR}/dependencies/vcpkg_overlay_ports")
 	endif()
 	set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/dependencies/vcpkg/scripts/buildsystems/vcpkg.cmake"
 		CACHE STRING "Vcpkg toolchain file")
@@ -98,6 +99,7 @@ endif()
 if (UNIX AND NOT APPLE)
 	option(ENABLE_WAYLAND "Build with Wayland support" ON)
 	option(ENABLE_FERAL_GAMEMODE "Enables Feral Interactive GameMode Support" ON)
+	option(ENABLE_BLUEZ "Build with Bluez support" ON)
 endif()
 
 option(ENABLE_OPENGL "Enables the OpenGL backend" ON)
@@ -121,23 +123,6 @@ if (WIN32)
 	option(ENABLE_XAUDIO "Enables the xaudio backend" ON)
 endif()
 option(ENABLE_CUBEB "Enabled cubeb backend" ON)
-
-# usb hid backends
-if (WIN32)
-	option(ENABLE_NSYSHID_WINDOWS_HID "Enables the native Windows HID backend for nsyshid" ON)
-endif ()
-# libusb and windows hid backends shouldn't be active at the same time; otherwise we'd see all devices twice!
-if (NOT ENABLE_NSYSHID_WINDOWS_HID)
-	option(ENABLE_NSYSHID_LIBUSB "Enables the libusb backend for nsyshid" ON)
-else ()
-	set(ENABLE_NSYSHID_LIBUSB OFF CACHE BOOL "" FORCE)
-endif ()
-if (ENABLE_NSYSHID_WINDOWS_HID)
-	add_compile_definitions(NSYSHID_ENABLE_BACKEND_WINDOWS_HID)
-endif ()
-if (ENABLE_NSYSHID_LIBUSB)
-	add_compile_definitions(NSYSHID_ENABLE_BACKEND_LIBUSB)
-endif ()
 
 option(ENABLE_WXWIDGETS "Build with wxWidgets UI (Currently required)" ON)
 
@@ -174,10 +159,16 @@ if (UNIX AND NOT APPLE)
 			BASENAME viewporter)
 		add_library(CemuWaylandProtocols STATIC ${WAYLAND_PROTOCOL_SRCS})
 		target_include_directories(CemuWaylandProtocols PUBLIC "${CMAKE_CURRENT_BINARY_DIR}")
-
+		target_include_directories(CemuWaylandProtocols PRIVATE ${Wayland_INCLUDE_DIRS})
 		add_compile_definitions(HAS_WAYLAND)
 	endif()
 	find_package(GTK3 REQUIRED)
+
+	if(ENABLE_BLUEZ)
+		find_package(bluez REQUIRED)
+		set(SUPPORTS_WIIMOTE ON)
+		add_compile_definitions(HAS_BLUEZ)
+	endif()
 
 endif()
 
@@ -191,13 +182,11 @@ endif()
 
 if (ENABLE_DISCORD_RPC)
 	add_compile_definitions(ENABLE_DISCORD_RPC)
-	add_subdirectory(dependencies/discord-rpc EXCLUDE_FROM_ALL)
-	target_include_directories(discord-rpc INTERFACE ./dependencies/discord-rpc/include)
 endif()
 
 if (ENABLE_HIDAPI)
 	find_package(hidapi REQUIRED)
-	set(ENABLE_WIIMOTE ON)
+	set(SUPPORTS_WIIMOTE ON)
 	add_compile_definitions(HAS_HIDAPI)
 endif ()
 
@@ -210,7 +199,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 if (ENABLE_WXWIDGETS)
-	find_package(wxWidgets 3.2 REQUIRED COMPONENTS base core gl propgrid xrc)
+	find_package(wxWidgets 3.3 REQUIRED COMPONENTS base core gl propgrid xrc)
 endif()
 
 if (ENABLE_CUBEB)
@@ -230,6 +219,15 @@ if (ENABLE_CUBEB)
 endif()
 
 add_subdirectory("dependencies/ih264d" EXCLUDE_FROM_ALL)
+
+if (CMAKE_OSX_ARCHITECTURES)
+	set(CEMU_ARCHITECTURE ${CMAKE_OSX_ARCHITECTURES})
+else()
+	set(CEMU_ARCHITECTURE ${CMAKE_SYSTEM_PROCESSOR})
+endif()
+if(CEMU_ARCHITECTURE MATCHES "(aarch64)|(AARCH64)|(arm64)|(ARM64)")
+	add_subdirectory("dependencies/xbyak_aarch64" EXCLUDE_FROM_ALL)
+endif()
 
 find_package(ZArchive)
 if (NOT ZArchive_FOUND)

@@ -65,6 +65,10 @@ public:
 	virtual void DrawEmptyFrame(bool mainWindow) = 0;
 	virtual void SwapBuffers(bool swapTV, bool swapDRC) = 0;
 
+	using ScreenshotSaveFunction = std::function<std::optional<std::string>(const std::vector<uint8>&, int, int, bool)>;
+	void RequestScreenshot(ScreenshotSaveFunction onSaveScreenshot);
+	void CancelScreenshotRequest();
+
 	virtual void HandleScreenshotRequest(LatteTextureView* texView, bool padView){}
 	
 	virtual void DrawBackbufferQuad(LatteTextureView* texView, RendererOutputShader* shader, bool useLinearTexFilter, 
@@ -138,8 +142,15 @@ public:
 	virtual void draw_endSequence() = 0;
 
 	// index
-	virtual void* indexData_reserveIndexMemory(uint32 size, uint32& offset, uint32& bufferIndex) = 0;
-	virtual void indexData_uploadIndexMemory(uint32 offset, uint32 size) = 0;
+	struct IndexAllocation
+	{
+		void* mem; // pointer to index data inside buffer
+		void* rendererInternal; // for renderer use
+	};
+
+	virtual IndexAllocation indexData_reserveIndexMemory(uint32 size) = 0;
+	virtual void indexData_releaseIndexMemory(IndexAllocation& allocation) = 0;
+	virtual void indexData_uploadIndexMemory(IndexAllocation& allocation) = 0;
 
 	// occlusion queries
 	virtual LatteQueryObject* occlusionQuery_create() = 0;
@@ -161,7 +172,10 @@ protected:
 		Pad,
 	};
 	ScreenshotState m_screenshot_state = ScreenshotState::None;
-	void SaveScreenshot(const std::vector<uint8>& rgb_data, int width, int height, bool mainWindow) const;
+	bool m_screenshot_requested = false;
+	ScreenshotSaveFunction m_on_save_screenshot;
+
+	void SaveScreenshot(const std::vector<uint8>& rgb_data, int width, int height, bool mainWindow);
 
 
 	ImFontAtlas* imguiFontAtlas{};

@@ -1,12 +1,12 @@
 #include "Cafe/OS/common/OSCommon.h"
 #include "Cafe/HW/Espresso/PPCCallback.h"
-#include "gui/wxgui.h"
 #include "Cafe/OS/libs/vpad/vpad.h"
 #include "audio/IAudioAPI.h"
 #include "Cafe/OS/libs/coreinit/coreinit_Time.h"
 #include "config/ActiveSettings.h"
 #include "Cafe/OS/libs/coreinit/coreinit_Alarm.h"
 #include "input/InputManager.h"
+#include "WindowSystem.h"
 
 #ifdef PUBLIC_RELASE
 #define vpadbreak() 
@@ -263,11 +263,11 @@ namespace vpad
 			PPCCore_switchToScheduler();
 		}
 
-		if (!g_inputConfigWindowHasFocus)
+		if (!WindowSystem::InputConfigWindowHasFocus())
 		{
 			if (channel <= 1 && vpadDelayEnabled)
 			{
-				uint64 currentTime = coreinit::coreinit_getOSTime();
+				uint64 currentTime = coreinit::OSGetTime();
 				const auto dif = currentTime - vpad::g_vpad.controller_data[channel].drcLastCallTime;
 				if (dif <= (ESPRESSO_TIMER_CLOCK / 60ull))
 				{
@@ -1149,7 +1149,7 @@ namespace vpad
 	void start()
 	{
 		coreinit::OSCreateAlarm(&g_vpad.alarm);
-		const uint64 start_tick = coreinit::coreinit_getOSTime();
+		const uint64 start_tick = coreinit::OSGetTime();
 		const uint64 period_tick = coreinit::EspressoTime::GetTimerClock() * 5 / 1000;
 		const MPTR handler = PPCInterpreter_makeCallableExportDepr(TickFunction);
 		coreinit::OSSetPeriodicAlarm(&g_vpad.alarm, start_tick, period_tick, handler);

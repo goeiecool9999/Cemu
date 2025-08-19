@@ -298,7 +298,8 @@ PipelineInfo* VulkanRenderer::draw_createGraphicsPipeline(uint32 indexCount)
 	// init pipeline compiler
 	PipelineCompiler* pipelineCompiler = new PipelineCompiler();
 
-	pipelineCompiler->InitFromCurrentGPUState(pipelineInfo, LatteGPUState.contextNew, vkFBO->GetRenderPassObjSelfRef());
+	bool requiresRobustBufferAccess = PipelineCompiler::CalcRobustBufferAccessRequirement(vertexShader, pixelShader, geometryShader);
+	pipelineCompiler->InitFromCurrentGPUState(pipelineInfo, LatteGPUState.contextNew, vkFBO->GetRenderPassObjSelfRef(), requiresRobustBufferAccess);
 	pipelineCompiler->TrackAsCached(vsBaseHash, pipelineHash);
 
 	// use heuristics based on parameter patterns to determine if the current drawcall is essential (non-skipable)
@@ -357,18 +358,20 @@ PipelineInfo* VulkanRenderer::draw_getOrCreateGraphicsPipeline(uint32 indexCount
 	return draw_createGraphicsPipeline(indexCount);
 }
 
-void* VulkanRenderer::indexData_reserveIndexMemory(uint32 size, uint32& offset, uint32& bufferIndex)
+Renderer::IndexAllocation VulkanRenderer::indexData_reserveIndexMemory(uint32 size)
 {
-	auto& indexAllocator = this->memoryManager->getIndexAllocator();
-	auto resv = indexAllocator.AllocateBufferMemory(size, 32);
-	offset = resv.bufferOffset;
-	bufferIndex = resv.bufferIndex;
-	return resv.memPtr;
+	VKRSynchronizedHeapAllocator::AllocatorReservation* resv = memoryManager->GetIndexAllocator().AllocateBufferMemory(size, 32);
+	return { resv->memPtr, resv };
 }
 
-void VulkanRenderer::indexData_uploadIndexMemory(uint32 offset, uint32 size)
+void VulkanRenderer::indexData_releaseIndexMemory(IndexAllocation& allocation)
 {
-	// does nothing since the index buffer memory is coherent
+	memoryManager->GetIndexAllocator().FreeReservation((VKRSynchronizedHeapAllocator::AllocatorReservation*)allocation.rendererInternal);
+}
+
+void VulkanRenderer::indexData_uploadIndexMemory(IndexAllocation& allocation)
+{
+	memoryManager->GetIndexAllocator().FlushReservation((VKRSynchronizedHeapAllocator::AllocatorReservation*)allocation.rendererInternal);
 }
 
 float s_vkUniformData[512 * 4];
@@ -601,7 +604,7 @@ VkDescriptorSetInfo* VulkanRenderer::draw_getOrCreateDescriptorSet(PipelineInfo*
 		const auto it = pipeline_info->vertex_ds_cache.find(stateHash);
 		if (it != pipeline_info->vertex_ds_cache.cend())
 			return it->second;
-		descriptor_set_layout = pipeline_info->m_vkrObjPipeline->vertexDSL;
+		descriptor_set_layout = pipeline_info->m_vkrObjPipeline->m_vertexDSL;
 		break;
 	}
 	case LatteConst::ShaderType::Pixel:
@@ -609,7 +612,7 @@ VkDescriptorSetInfo* VulkanRenderer::draw_getOrCreateDescriptorSet(PipelineInfo*
 		const auto it = pipeline_info->pixel_ds_cache.find(stateHash);
 		if (it != pipeline_info->pixel_ds_cache.cend())
 			return it->second;
-		descriptor_set_layout = pipeline_info->m_vkrObjPipeline->pixelDSL;
+		descriptor_set_layout = pipeline_info->m_vkrObjPipeline->m_pixelDSL;
 		break;
 	}
 	case LatteConst::ShaderType::Geometry:
@@ -617,7 +620,7 @@ VkDescriptorSetInfo* VulkanRenderer::draw_getOrCreateDescriptorSet(PipelineInfo*
 		const auto it = pipeline_info->geometry_ds_cache.find(stateHash);
 		if (it != pipeline_info->geometry_ds_cache.cend())
 			return it->second;
-		descriptor_set_layout = pipeline_info->m_vkrObjPipeline->geometryDSL;
+		descriptor_set_layout = pipeline_info->m_vkrObjPipeline->m_geometryDSL;
 		break;
 	}
 	default:
@@ -727,7 +730,6 @@ VkDescriptorSetInfo* VulkanRenderer::draw_getOrCreateDescriptorSet(PipelineInfo*
 
 		VkSamplerCustomBorderColorCreateInfoEXT samplerCustomBorderColor{};
 
-		VkSampler sampler;
 		VkSamplerCreateInfo samplerInfo{};
 		samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 
@@ -900,9 +902,9 @@ VkDescriptorSetInfo* VulkanRenderer::draw_getOrCreateDescriptorSet(PipelineInfo*
 			}
 		}
 
-		if (vkCreateSampler(m_logicalDevice, &samplerInfo, nullptr, &sampler) != VK_SUCCESS)
-			UnrecoverableError("Failed to create texture sampler");
-		info.sampler = sampler;
+		VKRObjectSampler* samplerObj = VKRObjectSampler::GetOrCreateSampler(&samplerInfo);
+		vkObjDS->addRef(samplerObj);
+		info.sampler = samplerObj->GetSampler();
 		textureArray.emplace_back(info);
 	}
 
@@ -1163,28 +1165,17 @@ void VulkanRenderer::draw_prepareDescriptorSets(PipelineInfo* pipeline_info, VkD
 	const auto geometryShader = LatteSHRC_GetActiveGeometryShader();
 	const auto pixelShader = LatteSHRC_GetActivePixelShader();
 
-
-	if (vertexShader)
-	{
-		auto descriptorSetInfo = draw_getOrCreateDescriptorSet(pipeline_info, vertexShader);
+	auto prepareShaderDescriptors = [this, &pipeline_info](LatteDecompilerShader* shader) -> VkDescriptorSetInfo* {
+		if (!shader)
+			return nullptr;
+		auto descriptorSetInfo = draw_getOrCreateDescriptorSet(pipeline_info, shader);
 		descriptorSetInfo->m_vkObjDescriptorSet->flagForCurrentCommandBuffer();
-		vertexDS = descriptorSetInfo;
-	}
+		return descriptorSetInfo;
+	};
 
-	if (pixelShader)
-	{
-		auto descriptorSetInfo = draw_getOrCreateDescriptorSet(pipeline_info, pixelShader);
-		descriptorSetInfo->m_vkObjDescriptorSet->flagForCurrentCommandBuffer();
-		pixelDS = descriptorSetInfo;
-
-	}
-
-	if (geometryShader)
-	{
-		auto descriptorSetInfo = draw_getOrCreateDescriptorSet(pipeline_info, geometryShader);
-		descriptorSetInfo->m_vkObjDescriptorSet->flagForCurrentCommandBuffer();
-		geometryDS = descriptorSetInfo;
-	}
+	vertexDS = prepareShaderDescriptors(vertexShader);
+	pixelDS = prepareShaderDescriptors(pixelShader);
+	geometryDS = prepareShaderDescriptors(geometryShader);
 }
 
 void VulkanRenderer::draw_updateVkBlendConstants()
@@ -1481,14 +1472,15 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 	uint32 hostIndexCount;
 	uint32 indexMin = 0;
 	uint32 indexMax = 0;
-	uint32 indexBufferOffset = 0;
-	uint32 indexBufferIndex = 0;
-	LatteIndices_decode(memory_getPointerFromVirtualOffset(indexDataMPTR), indexType, count, primitiveMode, indexMin, indexMax, hostIndexType, hostIndexCount, indexBufferOffset, indexBufferIndex);
-
+	Renderer::IndexAllocation indexAllocation;
+	LatteIndices_decode(memory_getPointerFromVirtualOffset(indexDataMPTR), indexType, count, primitiveMode, indexMin, indexMax, hostIndexType, hostIndexCount, indexAllocation);
+	VKRSynchronizedHeapAllocator::AllocatorReservation* indexReservation = (VKRSynchronizedHeapAllocator::AllocatorReservation*)indexAllocation.rendererInternal;
 	// update index binding
 	bool isPrevIndexData = false;
 	if (hostIndexType != INDEX_TYPE::NONE)
 	{
+		uint32 indexBufferIndex = indexReservation->bufferIndex;
+		uint32 indexBufferOffset = indexReservation->bufferOffset;
 		if (m_state.activeIndexBufferOffset != indexBufferOffset || m_state.activeIndexBufferIndex != indexBufferIndex || m_state.activeIndexType != hostIndexType)
 		{
 			m_state.activeIndexType = hostIndexType;
@@ -1501,7 +1493,7 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 				vkType = VK_INDEX_TYPE_UINT32;
 			else
 				cemu_assert(false);
-			vkCmdBindIndexBuffer(m_state.currentCommandBuffer, memoryManager->getIndexAllocator().GetBufferByIndex(indexBufferIndex), indexBufferOffset, vkType);
+			vkCmdBindIndexBuffer(m_state.currentCommandBuffer, indexReservation->vkBuffer, indexBufferOffset, vkType);
 		}
 		else
 			isPrevIndexData = true;
@@ -1556,8 +1548,7 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 	}
 
 	auto vkObjPipeline = pipeline_info->m_vkrObjPipeline;
-
-	if (vkObjPipeline->pipeline == VK_NULL_HANDLE)
+	if (vkObjPipeline->GetPipeline() == VK_NULL_HANDLE)
 	{
 		// invalid/uninitialized pipeline
 		m_state.activeVertexDS = nullptr;
@@ -1619,11 +1610,11 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 	setDescriptorSamplerFormats(pixelDS, m_state.hasRenderSelfDependency);
 	setDescriptorSamplerFormats(geometryDS, m_state.hasRenderSelfDependency);
 
-	if (m_state.currentPipeline != vkObjPipeline->pipeline)
+	if (m_state.currentPipeline != vkObjPipeline->GetPipeline())
 	{
-		vkCmdBindPipeline(m_state.currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkObjPipeline->pipeline);
+		vkCmdBindPipeline(m_state.currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkObjPipeline->GetPipeline());
 		vkObjPipeline->flagForCurrentCommandBuffer();
-		m_state.currentPipeline = vkObjPipeline->pipeline;
+		m_state.currentPipeline = vkObjPipeline->GetPipeline();
 		// depth bias
 		if (pipeline_info->usesDepthBias)
 			draw_updateDepthBias(true);
@@ -1655,7 +1646,7 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 		dsArray[1] = pixelDS->m_vkObjDescriptorSet->descriptorSet;
 
 		vkCmdBindDescriptorSets(m_state.currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			vkObjPipeline->pipeline_layout, 0, 2, dsArray, numDynOffsetsVS + numDynOffsetsPS,
+			vkObjPipeline->m_pipelineLayout, 0, 2, dsArray, numDynOffsetsVS + numDynOffsetsPS,
 			dynamicOffsets);
 	}
 	else if (vertexDS)
@@ -1664,7 +1655,7 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 		draw_prepareDynamicOffsetsForDescriptorSet(VulkanRendererConst::SHADER_STAGE_INDEX_VERTEX, dynamicOffsets, numDynOffsets,
 			pipeline_info);
 		vkCmdBindDescriptorSets(m_state.currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			vkObjPipeline->pipeline_layout, 0, 1, &vertexDS->m_vkObjDescriptorSet->descriptorSet, numDynOffsets,
+			vkObjPipeline->m_pipelineLayout, 0, 1, &vertexDS->m_vkObjDescriptorSet->descriptorSet, numDynOffsets,
 			dynamicOffsets);
 	}
 	else if (pixelDS)
@@ -1673,7 +1664,7 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 		draw_prepareDynamicOffsetsForDescriptorSet(VulkanRendererConst::SHADER_STAGE_INDEX_FRAGMENT, dynamicOffsets, numDynOffsets,
 			pipeline_info);
 		vkCmdBindDescriptorSets(m_state.currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			vkObjPipeline->pipeline_layout, 1, 1, &pixelDS->m_vkObjDescriptorSet->descriptorSet, numDynOffsets,
+			vkObjPipeline->m_pipelineLayout, 1, 1, &pixelDS->m_vkObjDescriptorSet->descriptorSet, numDynOffsets,
 			dynamicOffsets);
 	}
 	if (geometryDS)
@@ -1682,7 +1673,7 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 		draw_prepareDynamicOffsetsForDescriptorSet(VulkanRendererConst::SHADER_STAGE_INDEX_GEOMETRY, dynamicOffsets, numDynOffsets,
 			pipeline_info);
 		vkCmdBindDescriptorSets(m_state.currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			vkObjPipeline->pipeline_layout, 2, 1, &geometryDS->m_vkObjDescriptorSet->descriptorSet, numDynOffsets,
+			vkObjPipeline->m_pipelineLayout, 2, 1, &geometryDS->m_vkObjDescriptorSet->descriptorSet, numDynOffsets,
 			dynamicOffsets);
 	}
 

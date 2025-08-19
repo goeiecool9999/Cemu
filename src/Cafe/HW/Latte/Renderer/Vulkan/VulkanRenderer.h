@@ -123,6 +123,11 @@ public:
 	bool neverSkipAccurateBarrier{false};
 };
 
+namespace WindowSystem
+{
+	struct WindowHandleInfo;
+};
+
 class VulkanRenderer : public Renderer
 {
 	friend class LatteQueryObjectVk;
@@ -140,8 +145,8 @@ class VulkanRenderer : public Renderer
 public:
 
 	// memory management
-	VKRMemoryManager* memoryManager{};
-	VKRMemoryManager* GetMemoryManager() const { return memoryManager; };
+	std::unique_ptr<VKRMemoryManager> memoryManager;
+	VKRMemoryManager* GetMemoryManager() const { return memoryManager.get(); };
 
 	VkSupportedFormatInfo_t m_supportedFormatInfo;
 
@@ -199,7 +204,7 @@ public:
 #if BOOST_OS_WINDOWS
 	static VkSurfaceKHR CreateWinSurface(VkInstance instance, HWND hwindow);
 #endif
-#if BOOST_OS_LINUX
+#if BOOST_OS_LINUX || BOOST_OS_BSD
 	static VkSurfaceKHR CreateXlibSurface(VkInstance instance, Display* dpy, Window window);
     static VkSurfaceKHR CreateXcbSurface(VkInstance instance, xcb_connection_t* connection, xcb_window_t window);
 	#ifdef HAS_WAYLAND
@@ -207,7 +212,7 @@ public:
 	#endif
 #endif
 
-	static VkSurfaceKHR CreateFramebufferSurface(VkInstance instance, struct WindowHandleInfo& windowInfo);
+	static VkSurfaceKHR CreateFramebufferSurface(VkInstance instance, struct WindowSystem::WindowHandleInfo& windowInfo);
 
 	void AppendOverlayDebugInfo() override;
 
@@ -331,8 +336,9 @@ public:
 
 	RendererShader* shader_create(RendererShader::ShaderType type, uint64 baseHash, uint64 auxHash, const std::string& source, bool isGameShader, bool isGfxPackShader) override;
 
-	void* indexData_reserveIndexMemory(uint32 size, uint32& offset, uint32& bufferIndex) override;
-	void indexData_uploadIndexMemory(uint32 offset, uint32 size) override;
+	IndexAllocation indexData_reserveIndexMemory(uint32 size) override;
+	void indexData_releaseIndexMemory(IndexAllocation& allocation) override;
+	void indexData_uploadIndexMemory(IndexAllocation& allocation) override;
 
 	// externally callable
 	void GetTextureFormatInfoVK(Latte::E_GX2SURFFMT format, bool isDepth, Latte::E_DIM dim, sint32 width, sint32 height, FormatInfoVK* formatInfoOut);
@@ -456,6 +462,8 @@ private:
 			bool dynamic_rendering = false; // VK_KHR_dynamic_rendering
 			bool shader_float_controls = false; // VK_KHR_shader_float_controls
 			bool present_wait = false; // VK_KHR_present_wait
+			bool depth_clip_enable = false; // VK_EXT_depth_clip_enable
+			bool pipeline_robustness = false; // VK_EXT_pipeline_robustness
 			bool attachment_feedback_loop_layout = false; //attachment_feedback_loop_layout
 		}deviceExtensions;
 
@@ -588,6 +596,8 @@ private:
 	std::shared_mutex m_pipeline_cache_save_mutex;
 	std::thread m_pipeline_cache_save_thread;
 	VkPipelineCache m_pipeline_cache{ nullptr };
+	std::unordered_map<uint64, VkPipeline> m_backbufferBlitPipelineCache;
+	std::unordered_map<uint64, VkDescriptorSet> m_backbufferBlitDescriptorSetCache;
 	VkPipelineLayout m_pipelineLayout{nullptr};
 	VkCommandPool m_commandPool{ nullptr };
 	

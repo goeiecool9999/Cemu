@@ -6,6 +6,28 @@
 
 #define GPU_GL_MAX_NUM_ATTRIBUTE		(16) // Wii U GPU supports more than 16 but not all desktop GPUs do. Have to keep this at 16 until we find a better solution
 
+class OpenGLCanvasCallbacks
+{
+  public:
+	virtual bool HasPadViewOpen() const
+	{
+		return false;
+	}
+	virtual bool MakeCurrent(bool padView)
+	{
+		return false;
+	}
+	virtual void SwapBuffers(bool swapTV, bool swapDRC) {}
+	virtual ~OpenGLCanvasCallbacks() = default;
+};
+
+void SetOpenGLCanvasCallbacks(OpenGLCanvasCallbacks* callbacks);
+void ClearOpenGLCanvasCallbacks();
+
+bool GLCanvas_HasPadViewOpen();
+bool GLCanvas_MakeCurrent(bool padView);
+void GLCanvas_SwapBuffers(bool swapTV, bool swapDRC);
+
 class OpenGLRenderer : public Renderer
 {
 	friend class OpenGLCanvas;
@@ -102,16 +124,21 @@ public:
 	static void SetAttributeArrayState(uint32 index, bool isEnabled, sint32 aluDivisor);
 	static void SetArrayElementBuffer(GLuint arrayElementBuffer);
 
-	// index
-	void* indexData_reserveIndexMemory(uint32 size, uint32& offset, uint32& bufferIndex) override
+	// index (not used by OpenGL renderer yet)
+	IndexAllocation indexData_reserveIndexMemory(uint32 size) override
 	{
-		assert_dbg();
-		return nullptr;
+		cemu_assert_unimplemented();
+		return {};
 	}
 
-	void indexData_uploadIndexMemory(uint32 offset, uint32 size) override
+	void indexData_releaseIndexMemory(IndexAllocation& allocation) override
 	{
-		assert_dbg();
+		cemu_assert_unimplemented();
+	}
+
+	void indexData_uploadIndexMemory(IndexAllocation& allocation) override
+	{
+		cemu_assert_unimplemented();
 	}
 
 	// uniform

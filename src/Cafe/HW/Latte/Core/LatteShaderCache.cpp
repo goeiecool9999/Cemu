@@ -6,7 +6,7 @@
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "Cemu/FileCache/FileCache.h"
 #include "Cafe/GameProfile/GameProfile.h"
-#include "gui/guiWrapper.h"
+#include "WindowSystem.h"
 
 #include "Cafe/HW/Latte/Renderer/Renderer.h"
 #include "Cafe/HW/Latte/Renderer/OpenGL/RendererShaderGL.h"
@@ -24,7 +24,9 @@
 #include "Cafe/HW/Latte/Common/ShaderSerializer.h"
 #include "util/helpers/Serializer.h"
 
-#include <wx/msgdlg.h>
+#include <audio/IAudioAPI.h>
+#include <util/bootSound/BootSoundReader.h>
+#include <thread>
 
 #if BOOST_OS_WINDOWS
 #include <psapi.h>
@@ -65,8 +67,6 @@ bool LatteShaderCache_readSeparableShader(uint8* shaderInfoData, sint32 shaderIn
 void LatteShaderCache_LoadVulkanPipelineCache(uint64 cacheTitleId);
 bool LatteShaderCache_updatePipelineLoadingProgress();
 void LatteShaderCache_ShowProgress(const std::function <bool(void)>& loadUpdateFunc, bool isPipelines);
-
-void LatteShaderCache_handleDeprecatedCacheFiles(fs::path pathGeneric, fs::path pathGenericPre1_25_0, fs::path pathGenericPre1_16_0);
 
 struct
 {
@@ -154,6 +154,118 @@ bool LoadTGAFile(const std::vector<uint8>& buffer, TGAFILE *tgaFile)
 
 	return true;
 }
+
+class BootSoundPlayer
+{
+  public:
+	BootSoundPlayer() = default;
+	~BootSoundPlayer()
+	{
+		m_stopRequested = true;
+	}
+
+	void StartSound()
+	{
+		if (!m_bootSndPlayThread.joinable())
+		{
+			m_fadeOutRequested = false;
+			m_stopRequested = false;
+			m_bootSndPlayThread = std::thread{[this]() {
+				StreamBootSound();
+			}};
+		}
+	}
+
+	void FadeOutSound()
+	{
+		m_fadeOutRequested = true;
+	}
+
+	void ApplyFadeOutEffect(std::span<sint16> samples, uint64& fadeOutSample, uint64 fadeOutDuration)
+	{
+		for (size_t i = 0; i < samples.size(); i += 2)
+		{
+			const float decibel = (float)fadeOutSample / fadeOutDuration * -60.0f;
+			const float volumeFactor = pow(10, decibel / 20);
+			samples[i] *= volumeFactor;
+			samples[i + 1] *= volumeFactor;
+			fadeOutSample++;
+		}
+	}
+
+	void StreamBootSound()
+	{
+		SetThreadName("bootsnd");
+		constexpr sint32 sampleRate = 48'000;
+		constexpr sint32 bitsPerSample = 16;
+		constexpr sint32 samplesPerBlock = sampleRate / 10; // block is 1/10th of a second
+		constexpr sint32 nChannels = 2;
+		static_assert(bitsPerSample % 8 == 0, "bits per sample is not a multiple of 8");
+
+		AudioAPIPtr bootSndAudioDev;
+
+		try
+		{
+			bootSndAudioDev = IAudioAPI::CreateDeviceFromConfig(IAudioAPI::AudioType::TV, sampleRate, nChannels, samplesPerBlock, bitsPerSample);
+			if(!bootSndAudioDev)
+				return;
+		}
+		catch (const std::runtime_error& ex)
+		{
+			cemuLog_log(LogType::Force, "Failed to initialise audio device for bootup sound");
+			return;
+		}
+		bootSndAudioDev->SetAudioDelayOverride(4);
+		bootSndAudioDev->Play();
+
+		std::string sndPath = fmt::format("{}/meta/{}", CafeSystem::GetMlcStoragePath(CafeSystem::GetForegroundTitleId()), "bootSound.btsnd");
+		sint32 fscStatus = FSC_STATUS_UNDEFINED;
+
+		if(!fsc_doesFileExist(sndPath.c_str()))
+			return;
+
+		FSCVirtualFile* bootSndFileHandle = fsc_open(sndPath.c_str(), FSC_ACCESS_FLAG::OPEN_FILE | FSC_ACCESS_FLAG::READ_PERMISSION, &fscStatus);
+		if(!bootSndFileHandle)
+		{
+			cemuLog_log(LogType::Force, "failed to open bootSound.btsnd");
+			return;
+		}
+
+		constexpr sint32 audioBlockSize = samplesPerBlock * (bitsPerSample/8) * nChannels;
+		BootSoundReader bootSndFileReader(bootSndFileHandle, audioBlockSize);
+
+		uint64 fadeOutSample = 0; // track how far into the fadeout
+		constexpr uint64 fadeOutDuration = sampleRate * 2; // fadeout should last 2 seconds
+		while(fadeOutSample < fadeOutDuration && !m_stopRequested)
+		{
+			while (bootSndAudioDev->NeedAdditionalBlocks())
+			{
+				sint16* data = bootSndFileReader.getSamples();
+				if(data == nullptr)
+				{
+					// break outer loop
+					m_stopRequested = true;
+					break;
+				}
+				if(m_fadeOutRequested)
+					ApplyFadeOutEffect({data, samplesPerBlock * nChannels}, fadeOutSample, fadeOutDuration);
+
+				bootSndAudioDev->FeedBlock(data);
+			}
+			// sleep for the duration of a single block
+			std::this_thread::sleep_for(std::chrono::milliseconds(samplesPerBlock / (sampleRate/ 1'000)));
+		}
+
+		if(bootSndFileHandle)
+			fsc_close(bootSndFileHandle);
+	}
+
+  private:
+	std::thread m_bootSndPlayThread;
+	std::atomic_bool m_fadeOutRequested = false;
+	std::atomic_bool m_stopRequested = false;
+};
+static BootSoundPlayer g_bootSndPlayer;
 
 void LatteShaderCache_finish()
 {
@@ -245,10 +357,7 @@ void LatteShaderCache_Load()
 		RendererShaderGL::ShaderCacheLoading_begin(cacheTitleId);
 	// get cache file name
 	const auto pathGeneric = ActiveSettings::GetCachePath("shaderCache/transferable/{:016x}_shaders.bin", cacheTitleId);
-	const auto pathGenericPre1_25_0 = ActiveSettings::GetCachePath("shaderCache/transferable/{:016x}.bin", cacheTitleId); // before 1.25.0
-	const auto pathGenericPre1_16_0 = ActiveSettings::GetCachePath("shaderCache/transferable/{:08x}.bin", CafeSystem::GetRPXHashBase()); // before 1.16.0
 
-	LatteShaderCache_handleDeprecatedCacheFiles(pathGeneric, pathGenericPre1_25_0, pathGenericPre1_16_0);
 	// calculate extraVersion for transferable and precompiled shader cache
 	uint32 transferableExtraVersion = SHADER_CACHE_GENERIC_EXTRA_VERSION;
     s_shaderCacheGeneric = FileCache::Open(pathGeneric, false, transferableExtraVersion); // legacy extra version (1.25.0 - 1.25.1b)
@@ -298,6 +407,9 @@ void LatteShaderCache_Load()
 
 	loadBackgroundTexture(true, g_shaderCacheLoaderState.textureTVId);
 	loadBackgroundTexture(false, g_shaderCacheLoaderState.textureDRCId);
+
+	if(GetConfig().play_boot_sound)
+		g_bootSndPlayer.StartSound();
 
 	sint32 numLoadedShaders = 0;
 	uint32 loadIndex = 0;
@@ -365,6 +477,11 @@ void LatteShaderCache_Load()
 		g_renderer->DeleteTexture(g_shaderCacheLoaderState.textureTVId);
 	if (g_shaderCacheLoaderState.textureDRCId)
 		g_renderer->DeleteTexture(g_shaderCacheLoaderState.textureDRCId);
+
+	g_bootSndPlayer.FadeOutSound();
+
+	if(Latte_GetStopSignal())
+		LatteThread_Exit();
 }
 
 void LatteShaderCache_ShowProgress(const std::function <bool(void)>& loadUpdateFunc, bool isPipelines)
@@ -388,7 +505,7 @@ void LatteShaderCache_ShowProgress(const std::function <bool(void)>& loadUpdateF
 			continue;
 
 		int w, h;
-		gui_getWindowPhysSize(w, h);
+		WindowSystem::GetWindowPhysSize(w, h);
 		const Vector2f window_size{ (float)w,(float)h };
 
 		ImGui_GetFont(window_size.y / 32.0f); // = 24 by default
@@ -505,8 +622,6 @@ void LatteShaderCache_LoadVulkanPipelineCache(uint64 cacheTitleId)
 	g_shaderCacheLoaderState.loadedPipelines = 0;
 	LatteShaderCache_ShowProgress(LatteShaderCache_updatePipelineLoadingProgress, true);
 	pipelineCache.EndLoading();
-    if(Latte_GetStopSignal())
-        LatteThread_Exit();
 }
 
 bool LatteShaderCache_updatePipelineLoadingProgress()
@@ -778,31 +893,4 @@ void LatteShaderCache_Close()
     // if Vulkan then also close pipeline cache
     if (g_renderer->GetType() == RendererAPI::Vulkan)
         VulkanPipelineStableCache::GetInstance().Close();
-}
-
-#include <wx/msgdlg.h>
-
-void LatteShaderCache_handleDeprecatedCacheFiles(fs::path pathGeneric, fs::path pathGenericPre1_25_0, fs::path pathGenericPre1_16_0)
-{
-	std::error_code ec;
-
-	bool hasOldCacheFiles = fs::exists(pathGenericPre1_25_0, ec) || fs::exists(pathGenericPre1_16_0, ec);
-	bool hasNewCacheFiles = fs::exists(pathGeneric, ec);
-
-	if (hasOldCacheFiles && !hasNewCacheFiles)
-	{
-		// ask user if they want to delete or keep the old cache file
-		auto infoMsg = _("Cemu detected that the shader cache for this game is outdated.\nOnly shader caches generated with Cemu 1.25.0 or above are supported.\n\nWe recommend deleting the outdated cache file as it will no longer be used by Cemu.");
-			
-		wxMessageDialog dialog(nullptr, infoMsg, _("Outdated shader cache"),
-			wxYES_NO | wxCENTRE | wxICON_EXCLAMATION);
-
-		dialog.SetYesNoLabels(_("Delete outdated cache file [recommended]"), _("Keep outdated cache file"));
-		const auto result = dialog.ShowModal();
-		if (result == wxID_YES)
-		{
-			fs::remove(pathGenericPre1_16_0, ec);
-			fs::remove(pathGenericPre1_25_0, ec);
-		}
-	}
 }

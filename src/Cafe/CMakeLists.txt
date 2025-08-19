@@ -67,24 +67,31 @@ add_library(CemuCafe
   HW/Espresso/Recompiler/PPCFunctionBoundaryTracker.h
   HW/Espresso/Recompiler/PPCRecompiler.cpp
   HW/Espresso/Recompiler/PPCRecompiler.h
-  HW/Espresso/Recompiler/PPCRecompilerImlAnalyzer.cpp
+  HW/Espresso/Recompiler/IML/IML.h
+  HW/Espresso/Recompiler/IML/IMLSegment.cpp
+  HW/Espresso/Recompiler/IML/IMLSegment.h
+  HW/Espresso/Recompiler/IML/IMLInstruction.cpp
+  HW/Espresso/Recompiler/IML/IMLInstruction.h
+  HW/Espresso/Recompiler/IML/IMLDebug.cpp
+  HW/Espresso/Recompiler/IML/IMLAnalyzer.cpp
+  HW/Espresso/Recompiler/IML/IMLOptimizer.cpp
+  HW/Espresso/Recompiler/IML/IMLRegisterAllocator.cpp
+  HW/Espresso/Recompiler/IML/IMLRegisterAllocator.h
+  HW/Espresso/Recompiler/IML/IMLRegisterAllocatorRanges.cpp
+  HW/Espresso/Recompiler/IML/IMLRegisterAllocatorRanges.h
   HW/Espresso/Recompiler/PPCRecompilerImlGen.cpp
   HW/Espresso/Recompiler/PPCRecompilerImlGenFPU.cpp
   HW/Espresso/Recompiler/PPCRecompilerIml.h
-  HW/Espresso/Recompiler/PPCRecompilerImlOptimizer.cpp
-  HW/Espresso/Recompiler/PPCRecompilerImlRanges.cpp
-  HW/Espresso/Recompiler/PPCRecompilerImlRanges.h
-  HW/Espresso/Recompiler/PPCRecompilerImlRegisterAllocator2.cpp
-  HW/Espresso/Recompiler/PPCRecompilerImlRegisterAllocator.cpp
   HW/Espresso/Recompiler/PPCRecompilerIntermediate.cpp
-  HW/Espresso/Recompiler/PPCRecompilerX64AVX.cpp
-  HW/Espresso/Recompiler/PPCRecompilerX64BMI.cpp
-  HW/Espresso/Recompiler/PPCRecompilerX64.cpp
-  HW/Espresso/Recompiler/PPCRecompilerX64FPU.cpp
-  HW/Espresso/Recompiler/PPCRecompilerX64Gen.cpp
-  HW/Espresso/Recompiler/PPCRecompilerX64GenFPU.cpp
-  HW/Espresso/Recompiler/PPCRecompilerX64.h
-  HW/Espresso/Recompiler/x64Emit.hpp
+  HW/Espresso/Recompiler/BackendX64/BackendX64AVX.cpp
+  HW/Espresso/Recompiler/BackendX64/BackendX64BMI.cpp
+  HW/Espresso/Recompiler/BackendX64/BackendX64.cpp
+  HW/Espresso/Recompiler/BackendX64/BackendX64FPU.cpp
+  HW/Espresso/Recompiler/BackendX64/BackendX64Gen.cpp
+  HW/Espresso/Recompiler/BackendX64/BackendX64GenFPU.cpp
+  HW/Espresso/Recompiler/BackendX64/BackendX64.h
+  HW/Espresso/Recompiler/BackendX64/X64Emit.hpp
+  HW/Espresso/Recompiler/BackendX64/x86Emitter.h
   HW/Latte/Common/RegisterSerializer.cpp
   HW/Latte/Common/RegisterSerializer.h
   HW/Latte/Common/ShaderSerializer.cpp
@@ -463,12 +470,16 @@ add_library(CemuCafe
   OS/libs/nsyshid/BackendEmulated.h
   OS/libs/nsyshid/BackendLibusb.cpp
   OS/libs/nsyshid/BackendLibusb.h
-  OS/libs/nsyshid/BackendWindowsHID.cpp
-  OS/libs/nsyshid/BackendWindowsHID.h
+  OS/libs/nsyshid/Dimensions.cpp
+  OS/libs/nsyshid/Dimensions.h
   OS/libs/nsyshid/Infinity.cpp
   OS/libs/nsyshid/Infinity.h
   OS/libs/nsyshid/Skylander.cpp
   OS/libs/nsyshid/Skylander.h
+  OS/libs/nsyshid/SkylanderXbox360.cpp
+  OS/libs/nsyshid/SkylanderXbox360.h
+  OS/libs/nsyshid/g721/g721.cpp
+  OS/libs/nsyshid/g721/g721.h
   OS/libs/nsyskbd/nsyskbd.cpp
   OS/libs/nsyskbd/nsyskbd.h
   OS/libs/nsysnet/nsysnet.cpp
@@ -526,12 +537,25 @@ if(APPLE)
 	target_sources(CemuCafe PRIVATE "HW/Latte/Renderer/Vulkan/CocoaSurface.mm")
 endif()
 
+if(CEMU_ARCHITECTURE MATCHES "(aarch64)|(AARCH64)|(arm64)|(ARM64)")
+  target_sources(CemuCafe PRIVATE
+    HW/Espresso/Recompiler/BackendAArch64/BackendAArch64.cpp
+    HW/Espresso/Recompiler/BackendAArch64/BackendAArch64.h
+  )
+  target_link_libraries(CemuCafe PRIVATE xbyak_aarch64)
+endif()
+
 set_property(TARGET CemuCafe PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 target_include_directories(CemuCafe PUBLIC "../")
 
+if (glslang_VERSION VERSION_LESS "15.0.0")
+	set(glslang_target "glslang::SPIRV")
+else()
+	set(glslang_target "glslang::glslang")
+endif()
+
 target_link_libraries(CemuCafe PRIVATE
-	CemuAsm
 	CemuAudio
 	CemuCommon
 	CemuComponents
@@ -545,7 +569,7 @@ target_link_libraries(CemuCafe PRIVATE
 	Boost::nowide
 	CURL::libcurl
 	fmt::fmt
-	glslang::SPIRV
+	${glslang_target}
 	ih264d
 	OpenSSL::Crypto
 	OpenSSL::SSL
@@ -561,20 +585,17 @@ if (ENABLE_WAYLAND)
   target_link_libraries(CemuCafe PUBLIC Wayland::Client)
 endif()
 
-if (ENABLE_NSYSHID_LIBUSB)
-	if (ENABLE_VCPKG)
-		find_package(PkgConfig REQUIRED)
-		pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0)
-		target_link_libraries(CemuCafe PRIVATE PkgConfig::libusb)
-	else ()
-		find_package(libusb MODULE REQUIRED)
-		target_link_libraries(CemuCafe PRIVATE libusb::libusb)
-	endif ()
+if (ENABLE_VCPKG)
+  if(WIN32)
+    set(PKG_CONFIG_EXECUTABLE "${VCPKG_INSTALLED_DIR}/x64-windows/tools/pkgconf/pkgconf.exe")
+  endif()
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0)
+  target_link_libraries(CemuCafe PRIVATE PkgConfig::libusb)
+else ()
+  find_package(libusb MODULE REQUIRED)
+  target_link_libraries(CemuCafe PRIVATE libusb::libusb)
 endif ()
-
-if (ENABLE_WXWIDGETS)
-	target_link_libraries(CemuCafe PRIVATE wx::base wx::core)
-endif()
 
 if(WIN32)
 	target_link_libraries(CemuCafe PRIVATE iphlpapi)
