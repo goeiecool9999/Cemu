@@ -316,6 +316,8 @@ void PipelineCompiler::CreateDescriptorSetLayout(VulkanRenderer* vkRenderer, Lat
 	// attributes
 	// -> not part of descriptor
 
+	std::vector<size_t> textureBindingIndices {};
+
 	// textures
 	sint32 textureBindingBase = shader->resourceMapping.getTextureBaseBindingPoint();
 	if (textureBindingBase >= 0)
@@ -329,6 +331,7 @@ void PipelineCompiler::CreateDescriptorSetLayout(VulkanRenderer* vkRenderer, Lat
 			entry.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			entry.pImmutableSamplers = nullptr;
 			entry.stageFlags = stageFlags;
+			textureBindingIndices.emplace_back(descriptorSetLayoutBindings.size());
 			descriptorSetLayoutBindings.emplace_back(entry);
 		}
 	}
@@ -378,10 +381,22 @@ void PipelineCompiler::CreateDescriptorSetLayout(VulkanRenderer* vkRenderer, Lat
 	if (shader->resourceMapping.hasUniformBuffers())
 		vkrPipelineInfo->dynamicOffsetInfo.hasUniformBuffers[stageIndex] = true;
 
+
+	VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags_create_info = {};
+	binding_flags_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+	binding_flags_create_info.bindingCount = descriptorSetLayoutBindings.size();
+	std::vector<VkDescriptorBindingFlags> flags(descriptorSetLayoutBindings.size(), 0);
+	for (auto& i : textureBindingIndices)
+		flags[i] = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+	binding_flags_create_info.pBindingFlags = flags.data();
+	binding_flags_create_info.pNext = nullptr;
+
 	VkDescriptorSetLayoutCreateInfo layoutInfo = {};
 	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 	layoutInfo.bindingCount = descriptorSetLayoutBindings.size();
 	layoutInfo.pBindings = descriptorSetLayoutBindings.data();
+	layoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+	layoutInfo.pNext = &binding_flags_create_info;
 
 	if (vkCreateDescriptorSetLayout(vkRenderer->m_logicalDevice, &layoutInfo, nullptr, &layout) != VK_SUCCESS)
 		vkRenderer->UnrecoverableError(fmt::format("Failed to create descriptor set layout for shader {0:#x}", shader->baseHash).c_str());

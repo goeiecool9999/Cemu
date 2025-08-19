@@ -559,6 +559,12 @@ VulkanRenderer::VulkanRenderer()
 		deviceExtensionFeatures = &attachmentFeedbackLoopLayoutFeature;
 		attachmentFeedbackLoopLayoutFeature.attachmentFeedbackLoopLayout = true;
 	}
+	VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeature{};
+	descriptorIndexingFeature.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT;
+	descriptorIndexingFeature.pNext = deviceExtensionFeatures;
+	deviceExtensionFeatures = &descriptorIndexingFeature;
+	descriptorIndexingFeature.descriptorBindingSampledImageUpdateAfterBind = true;
+
 
 	std::vector<const char*> used_extensions;
 	VkDeviceCreateInfo createInfo = CreateDeviceCreateInfo(queueCreateInfos, deviceFeatures, deviceExtensionFeatures, used_extensions);
@@ -3104,7 +3110,7 @@ void VulkanRenderer::CreateDescriptorPool()
 	poolInfo.poolSizeCount = poolSizes.size();
 	poolInfo.pPoolSizes = poolSizes.data();
 	poolInfo.maxSets = 1024 * 256;
-	poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT | VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
 
 	if (vkCreateDescriptorPool(m_logicalDevice, &poolInfo, nullptr, &m_descriptorPool) != VK_SUCCESS)
 		UnrecoverableError("Failed to create descriptor pool!");
