@@ -81,6 +81,7 @@ enum
 	MAINFRAME_MENU_ID_FILE_OPEN_CEMU_FOLDER,
 	MAINFRAME_MENU_ID_FILE_OPEN_MLC_FOLDER,
 	MAINFRAME_MENU_ID_FILE_OPEN_SHADERCACHE_FOLDER,
+	MAINFRAME_MENU_ID_FILE_CLEAR_SPOTPASS_CACHE,
 	MAINFRAME_MENU_ID_FILE_EXIT,
 	MAINFRAME_MENU_ID_FILE_END_EMULATION,
 	MAINFRAME_MENU_ID_FILE_RECENT_0,
@@ -178,6 +179,7 @@ EVT_MENU(MAINFRAME_MENU_ID_FILE_INSTALL_UPDATE, MainWindow::OnInstallUpdate)
 EVT_MENU(MAINFRAME_MENU_ID_FILE_OPEN_CEMU_FOLDER, MainWindow::OnOpenFolder)
 EVT_MENU(MAINFRAME_MENU_ID_FILE_OPEN_MLC_FOLDER, MainWindow::OnOpenFolder)
 EVT_MENU(MAINFRAME_MENU_ID_FILE_OPEN_SHADERCACHE_FOLDER, MainWindow::OnOpenFolder)
+EVT_MENU(MAINFRAME_MENU_ID_FILE_CLEAR_SPOTPASS_CACHE, MainWindow::OnClearSpotPassCache)
 EVT_MENU(MAINFRAME_MENU_ID_FILE_EXIT, MainWindow::OnFileExit)
 EVT_MENU(MAINFRAME_MENU_ID_FILE_END_EMULATION, MainWindow::OnFileMenu)
 EVT_MENU_RANGE(MAINFRAME_MENU_ID_FILE_RECENT_0 + 0, MAINFRAME_MENU_ID_FILE_RECENT_LAST, MainWindow::OnFileMenu)
@@ -696,8 +698,15 @@ void MainWindow::OnOpenFolder(wxCommandEvent& event)
 		wxLaunchDefaultApplication(wxHelper::FromPath(ActiveSettings::GetMlcPath()));
 	else if (id == MAINFRAME_MENU_ID_FILE_OPEN_SHADERCACHE_FOLDER)
 		wxLaunchDefaultApplication(wxHelper::FromPath(ActiveSettings::GetCachePath("shaderCache")));
+}
 
-
+void MainWindow::OnClearSpotPassCache(wxCommandEvent& event)
+{
+	fs::path bossPath = ActiveSettings::GetMlcPath("usr/boss");
+	fs::remove_all(bossPath);
+	// recreate usr/boss/
+	fs::create_directory(bossPath);
+	wxMessageBox(_("SpotPass cache cleared"));
 }
 
 void MainWindow::OnInstallUpdate(wxCommandEvent& event)
@@ -858,7 +867,7 @@ void MainWindow::OpenSettings()
 	const bool mlc_modified = frame.MLCModified();
 
 	if (paths_modified)
-		m_game_list->ReloadGameEntries(false);
+		m_game_list->ReloadGameEntries();
 	else
 		SaveSettings();
 
@@ -1003,7 +1012,7 @@ void MainWindow::OnConsoleLanguage(wxCommandEvent& event)
 	if (m_game_list)
 	{
 		m_game_list->DeleteCachedStrings();
-		m_game_list->ReloadGameEntries(false);
+		m_game_list->ReloadGameEntries();
 	}
 	GetConfigHandle().Save();
 }
@@ -1441,7 +1450,7 @@ void MainWindow::OnAccountListRefresh(wxCommandEvent& event)
 
 void MainWindow::OnRequestGameListRefresh(wxCommandEvent& event)
 {
-	m_game_list->ReloadGameEntries(false);
+	m_game_list->ReloadGameEntries();
 }
 
 void MainWindow::OnSetWindowTitle(wxCommandEvent& event)
@@ -2109,7 +2118,8 @@ void MainWindow::RecreateMenu()
 		m_loadMenuItem = m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_LOAD, _("&Load..."));
 		m_installUpdateMenuItem = m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_INSTALL_UPDATE, _("&Install game title, update or DLC..."));
 
-		sint32 recentFileIndex = 0;
+		wxMenu* recentMenu = new wxMenu();
+		sint32 recentFileIndex = 1;
 		m_fileMenuSeparator0 = nullptr;
 		m_fileMenuSeparator1 = nullptr;
 		for (size_t i = 0; i < guiConfig.recent_launch_files.size(); i++)
@@ -2117,15 +2127,21 @@ void MainWindow::RecreateMenu()
 			const std::string& pathStr = guiConfig.recent_launch_files[i];
 			if (pathStr.empty())
 				continue;
-			if (recentFileIndex == 0)
-				m_fileMenuSeparator0 = m_fileMenu->AppendSeparator();
-			m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_RECENT_0 + i, to_wxString(fmt::format("{}. {}", recentFileIndex, pathStr)));
+			recentMenu->Append(MAINFRAME_MENU_ID_FILE_RECENT_0 + i, to_wxString(fmt::format("{}. {}", recentFileIndex, pathStr)));
 			recentFileIndex++;
 
-			if (recentFileIndex >= 8)
+			if (recentFileIndex >= 10)
 				break;
 		}
-		m_fileMenuSeparator1 = m_fileMenu->AppendSeparator();
+		if (recentFileIndex == 0)
+		{
+			wxMenuItem* placeholder = recentMenu->Append(wxID_NONE, _("(No recent files)"));
+			placeholder->Enable(false);
+		}
+
+		m_fileMenu->AppendSeparator();
+		m_fileMenu->AppendSubMenu(recentMenu, _("Recent files"));
+		m_fileMenu->AppendSeparator();
 	}
 	else
 	{
@@ -2135,11 +2151,14 @@ void MainWindow::RecreateMenu()
 #endif
 	}
 
-	m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_OPEN_CEMU_FOLDER, _("&Open Cemu folder"));
-	m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_OPEN_MLC_FOLDER, _("&Open MLC folder"));
+	m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_OPEN_CEMU_FOLDER, _("Open Cemu folder"));
+	m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_OPEN_MLC_FOLDER, _("Open MLC folder"));
 	m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_OPEN_SHADERCACHE_FOLDER, _("Open &shader cache folder"));
 	m_fileMenu->AppendSeparator();
-
+	m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_CLEAR_SPOTPASS_CACHE, _("Clear Spot&Pass cache"), wxEmptyString);
+	if (m_game_launched)
+		m_fileMenu->Enable(MAINFRAME_MENU_ID_FILE_CLEAR_SPOTPASS_CACHE, false);
+	m_fileMenu->AppendSeparator();
 	m_exitMenuItem = m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_EXIT, _("&Exit"));
 	m_menuBar->Append(m_fileMenu, _("&File"));
 	// options->account submenu
