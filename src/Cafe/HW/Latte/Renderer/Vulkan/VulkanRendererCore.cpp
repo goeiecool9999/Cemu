@@ -1091,14 +1091,77 @@ void VulkanRenderer::draw_setRenderPass()
 {
 	CachedFBOVk* fboVk = m_state.activeFBO;
 
+	// update self-dependency flag
+	if (m_state.descriptorSetsChanged || m_state.activeRenderpassFBO != fboVk)
+	{
+		m_state.hasRenderSelfDependency = fboVk->CheckForCollision(m_state.activeVertexDS, m_state.activeGeometryDS, m_state.activePixelDS);
+	}
+
 	auto vkObjRenderPass = fboVk->GetRenderPassObj();
 	auto vkObjFramebuffer = fboVk->GetFramebufferObj();
 
 	if (m_state.activeRenderpassFBO == fboVk)
 	{
+		if (m_state.hasRenderSelfDependency)
+		{
+			size_t barrierCount = 0;
+			VkImageMemoryBarrier imageMemBarriers[8 + 2]{};
+
+			for (auto& i : fboVk->colorBuffer)
+			{
+				if (!i.texture)
+					break;
+				VkImageSubresourceRange range = {
+					VK_IMAGE_ASPECT_COLOR_BIT,
+					(uint32_t)i.texture->firstMip,
+					(uint32_t)i.texture->numMip,
+					(uint32_t)i.texture->firstSlice,
+					(uint32_t)i.texture->numSlice
+				};
+				auto baseTex = (LatteTextureVk*)i.texture->baseTexture;
+				const auto idx = barrierCount++;
+				imageMemBarriers[idx].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+				imageMemBarriers[idx].image = baseTex->GetImageObj()->m_image;
+				imageMemBarriers[idx].subresourceRange = range;
+				imageMemBarriers[idx].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				imageMemBarriers[idx].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				imageMemBarriers[idx].oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
+				imageMemBarriers[idx].newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
+				imageMemBarriers[idx].srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+				imageMemBarriers[idx].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+			}
+
+			if (auto i = fboVk->depthBuffer.texture)
+			{
+				VkImageSubresourceRange range = {
+					VK_IMAGE_ASPECT_COLOR_BIT,
+					(uint32_t)i->firstMip,
+					(uint32_t)i->numMip,
+					(uint32_t)i->firstSlice,
+					(uint32_t)i->numSlice
+				};
+				auto baseTex = (LatteTextureVk*)i->baseTexture;
+				const auto idx = barrierCount++;
+				imageMemBarriers[idx].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+				imageMemBarriers[idx].image = baseTex->GetImageObj()->m_image;
+				imageMemBarriers[idx].subresourceRange = range;
+				imageMemBarriers[idx].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				imageMemBarriers[idx].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				imageMemBarriers[idx].oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
+				imageMemBarriers[idx].newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
+				imageMemBarriers[idx].srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+				imageMemBarriers[idx].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+			}
+
+			vkCmdPipelineBarrier(m_state.currentCommandBuffer, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+				VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT, 0, nullptr, 0, nullptr, barrierCount, imageMemBarriers);
+		}
 		return;
 	}
 	draw_endRenderPass();
+
+	// assume that FBO changed, update self-dependency state
+	m_state.hasRenderSelfDependency = fboVk->CheckForCollision(m_state.activeVertexDS, m_state.activeGeometryDS, m_state.activePixelDS);
 
 	if (m_featureControl.deviceExtensions.dynamic_rendering)
 	{
@@ -1439,6 +1502,9 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 		vkCmdDrawIndexed(m_state.currentCommandBuffer, hostIndexCount, instanceCount, 0, baseVertex, baseInstance);
 	else
 		vkCmdDraw(m_state.currentCommandBuffer, count, instanceCount, baseVertex, baseInstance);
+
+
+
 
 	LatteStreamout_FinishDrawcall(m_useHostMemoryForCache);
 

@@ -188,3 +188,42 @@ void CachedFBOVk::InitDynamicRenderingData()
 	m_vkRenderingInfo.viewMask = 0; // multiview disabled
 	m_vkRenderingInfo.layerCount = 1;
 }
+
+
+uint32 s_currentCollisionCheckIndex = 1;
+
+bool CachedFBOVk::CheckForCollision(VkDescriptorSetInfo* vsDS, VkDescriptorSetInfo* gsDS, VkDescriptorSetInfo* psDS) const
+{
+	s_currentCollisionCheckIndex++;
+	const uint32 curColIndex = s_currentCollisionCheckIndex;
+	for (auto& itr : m_referencedTextures)
+	{
+		LatteTextureVk* vkTex = (LatteTextureVk*)itr;
+		vkTex->m_collisionCheckIndex = curColIndex;
+	}
+	if (vsDS)
+	{
+		for (auto& itr : vsDS->list_fboCandidates)
+		{
+			if (itr->m_collisionCheckIndex == curColIndex)
+				return true;
+		}
+	}
+	if (gsDS)
+	{
+		for (auto& itr : gsDS->list_fboCandidates)
+		{
+			if (itr->m_collisionCheckIndex == curColIndex)
+				return true;
+		}
+	}
+	if (psDS)
+	{
+		for (auto& itr : psDS->list_fboCandidates)
+		{
+			if (itr->m_collisionCheckIndex == curColIndex)
+				return true;
+		}
+	}
+	return false;
+}

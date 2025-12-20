@@ -408,10 +408,6 @@ private:
 			activeIndexBufferOffset = std::numeric_limits<uint32>::max();
 		}
 
-		// invalidation / flushing
-		uint64 currentFlushIndex{0};
-		bool requestFlush{ false }; // flush after every draw operation. The renderpass dependencies dont handle dependencies across multiple drawcalls inside a single renderpass
-
 		// draw sequence
 		bool drawSequenceSkip; // if true, skip draw_execute()
 	}m_state;
