@@ -130,7 +130,7 @@ void LatteTextureReadbackInfoVk::StartTransfer()
 
 	renderer->barrier_sequentializeTransfer();
 
-	renderer->barrier_image<VulkanRenderer::TRANSFER_READ, VulkanRenderer::ANY_TRANSFER | VulkanRenderer::IMAGE_WRITE>(baseTexture, region.imageSubresource, VK_IMAGE_LAYOUT_GENERAL); // make sure transfer is finished before image is modified
+	renderer->barrier_image<VulkanRenderer::TRANSFER_READ, VulkanRenderer::ANY_TRANSFER | VulkanRenderer::IMAGE_WRITE>(baseTexture, region.imageSubresource, VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT); // make sure transfer is finished before image is modified
 	renderer->barrier_bufferRange<VulkanRenderer::TRANSFER_WRITE, VulkanRenderer::HOST_READ>(m_buffer, m_buffer_offset, m_image_size); // make sure transfer is finished before result is read
 
 	m_associatedCommandBufferId = renderer->GetCurrentCommandBufferId();

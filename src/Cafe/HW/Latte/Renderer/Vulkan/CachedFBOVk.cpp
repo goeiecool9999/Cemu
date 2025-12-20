@@ -106,7 +106,7 @@ void CachedFBOVk::InitDynamicRenderingData()
 	{
 		m_vkColorAttachments[i].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
 		m_vkColorAttachments[i].pNext = nullptr;
-		m_vkColorAttachments[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		m_vkColorAttachments[i].imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
 
 		m_vkColorAttachments[i].resolveMode = VK_RESOLVE_MODE_NONE;
 		m_vkColorAttachments[i].resolveImageView = VK_NULL_HANDLE;
@@ -142,7 +142,7 @@ void CachedFBOVk::InitDynamicRenderingData()
 	// initially set both stencil and depth attachment to an empty default
 	m_vkDepthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
 	m_vkDepthAttachment.pNext = nullptr;
-	m_vkDepthAttachment.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	m_vkDepthAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
 	m_vkDepthAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
 	m_vkDepthAttachment.resolveImageView = VK_NULL_HANDLE;
 	m_vkDepthAttachment.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -151,7 +151,7 @@ void CachedFBOVk::InitDynamicRenderingData()
 
 	m_vkStencilAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
 	m_vkStencilAttachment.pNext = nullptr;
-	m_vkStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	m_vkStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
 	m_vkStencilAttachment.resolveMode = VK_RESOLVE_MODE_NONE;
 	m_vkStencilAttachment.resolveImageView = VK_NULL_HANDLE;
 	m_vkStencilAttachment.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -187,43 +187,4 @@ void CachedFBOVk::InitDynamicRenderingData()
 	m_vkRenderingInfo.renderArea.extent = m_extend;
 	m_vkRenderingInfo.viewMask = 0; // multiview disabled
 	m_vkRenderingInfo.layerCount = 1;
-}
-
-
-uint32 s_currentCollisionCheckIndex = 1;
-
-bool CachedFBOVk::CheckForCollision(VkDescriptorSetInfo* vsDS, VkDescriptorSetInfo* gsDS, VkDescriptorSetInfo* psDS) const
-{
-	s_currentCollisionCheckIndex++;
-	const uint32 curColIndex = s_currentCollisionCheckIndex;
-	for (auto& itr : m_referencedTextures)
-	{
-		LatteTextureVk* vkTex = (LatteTextureVk*)itr;
-		vkTex->m_collisionCheckIndex = curColIndex;
-	}
-	if (vsDS)
-	{
-		for (auto& itr : vsDS->list_fboCandidates)
-		{
-			if (itr->m_collisionCheckIndex == curColIndex)
-				return true;
-		}
-	}
-	if (gsDS)
-	{
-		for (auto& itr : gsDS->list_fboCandidates)
-		{
-			if (itr->m_collisionCheckIndex == curColIndex)
-				return true;
-		}
-	}
-	if (psDS)
-	{
-		for (auto& itr : psDS->list_fboCandidates)
-		{
-			if (itr->m_collisionCheckIndex == curColIndex)
-				return true;
-		}
-	}
-	return false;
 }

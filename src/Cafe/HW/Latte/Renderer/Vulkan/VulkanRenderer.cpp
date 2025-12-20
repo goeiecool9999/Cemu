@@ -550,6 +550,20 @@ VulkanRenderer::VulkanRenderer()
 		deviceExtensionFeatures = &pipelineRobustnessFeature;
 		pipelineRobustnessFeature.pipelineRobustness = VK_TRUE;
 	}
+	VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT attachmentFeedbackLoopLayoutFeature{};
+	if(m_featureControl.deviceExtensions.attachment_feedback_loop_layout)
+	{
+		attachmentFeedbackLoopLayoutFeature.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT;
+		attachmentFeedbackLoopLayoutFeature.pNext = deviceExtensionFeatures;
+		deviceExtensionFeatures = &attachmentFeedbackLoopLayoutFeature;
+		attachmentFeedbackLoopLayoutFeature.attachmentFeedbackLoopLayout = true;
+	}
+	VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeature{};
+	descriptorIndexingFeature.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT;
+	descriptorIndexingFeature.pNext = deviceExtensionFeatures;
+	deviceExtensionFeatures = &descriptorIndexingFeature;
+	descriptorIndexingFeature.descriptorBindingSampledImageUpdateAfterBind = true;
+
 
 	std::vector<const char*> used_extensions;
 	VkDeviceCreateInfo createInfo = CreateDeviceCreateInfo(queueCreateInfos, deviceFeatures, deviceExtensionFeatures, used_extensions);
@@ -1137,6 +1151,8 @@ VkDeviceCreateInfo VulkanRenderer::CreateDeviceCreateInfo(const std::vector<VkDe
 	}
 	if (m_featureControl.deviceExtensions.pipeline_robustness)
 		used_extensions.emplace_back(VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME);
+	if (m_featureControl.deviceExtensions.attachment_feedback_loop_layout)
+		used_extensions.emplace_back(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME);
 
 	VkDeviceCreateInfo createInfo{};
 	createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -1235,6 +1251,7 @@ bool VulkanRenderer::CheckDeviceExtensionSupport(const VkPhysicalDevice device, 
 	info.deviceExtensions.dynamic_rendering = false; // isExtensionAvailable(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
 	info.deviceExtensions.depth_clip_enable = isExtensionAvailable(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME);
 	info.deviceExtensions.pipeline_robustness = isExtensionAvailable(VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME);
+	info.deviceExtensions.attachment_feedback_loop_layout = isExtensionAvailable(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME);
 	// dynamic rendering doesn't provide any benefits for us right now. Driver implementations are very unoptimized as of Feb 2022
 	info.deviceExtensions.present_wait = isExtensionAvailable(VK_KHR_PRESENT_WAIT_EXTENSION_NAME) && isExtensionAvailable(VK_KHR_PRESENT_ID_EXTENSION_NAME);
 
@@ -1531,7 +1548,7 @@ void VulkanRenderer::CreateNullTexture(NullTexture& nullTex, VkImageType imageTy
 		cemu_assert(false);
 	}
 	imageInfo.mipLevels = 1;
-	imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT;
 	imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
 	imageInfo.extent.depth = 1;
@@ -3328,7 +3345,7 @@ void VulkanRenderer::texture_clearDepthSlice(LatteTexture* hostTexture, uint32 s
 
 	vkCmdClearDepthStencilImage(m_state.currentCommandBuffer, imageObj->m_image, VK_IMAGE_LAYOUT_GENERAL, &depthStencilValue, 1, &range);
 
-	barrier_image<ANY_TRANSFER, ANY_TRANSFER | IMAGE_READ | IMAGE_WRITE>(vkTexture, subresourceRange, VK_IMAGE_LAYOUT_GENERAL);
+	barrier_image<ANY_TRANSFER, ANY_TRANSFER | IMAGE_READ | IMAGE_WRITE>(vkTexture, subresourceRange, VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT);
 }
 
 void VulkanRenderer::texture_loadSlice(LatteTexture* hostTexture, sint32 width, sint32 height, sint32 depth, void* pixelData, sint32 sliceIndex, sint32 mipIndex, uint32 compressedImageSize)
@@ -3431,7 +3448,7 @@ void VulkanRenderer::texture_loadSlice(LatteTexture* hostTexture, sint32 width, 
 
 	vkCmdCopyBufferToImage(m_state.currentCommandBuffer, uploadResv.vkBuffer, vkImageObj->m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, imageRegionCount, imageRegion);
 
-	barrier_image<ANY_TRANSFER, ANY_TRANSFER | IMAGE_READ | IMAGE_WRITE>(vkTexture, barrierSubresourceRange, VK_IMAGE_LAYOUT_GENERAL);
+	barrier_image<ANY_TRANSFER, ANY_TRANSFER | IMAGE_READ | IMAGE_WRITE>(vkTexture, barrierSubresourceRange, VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT);
 }
 
 LatteTexture* VulkanRenderer::texture_createTextureEx(Latte::E_DIM dim, MPTR physAddress, MPTR physMipAddress, Latte::E_GX2SURFFMT format, uint32 width, uint32 height, uint32 depth, uint32 pitch, uint32 mipLevels,
@@ -4008,7 +4025,7 @@ VKRObjectRenderPass::VKRObjectRenderPass(AttachmentInfo_t& attachmentInfo, sint3
 		m_colorAttachmentFormat[i] = attachmentInfo.colorAttachment[i].format;
 
 		color_attachments_references[i].attachment = (uint32)attachments_descriptions.size();
-		color_attachments_references[i].layout = VK_IMAGE_LAYOUT_GENERAL;
+		color_attachments_references[i].layout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
 
 		VkAttachmentDescription entry{};
 		entry.format = attachmentInfo.colorAttachment[i].format;
@@ -4017,8 +4034,8 @@ VKRObjectRenderPass::VKRObjectRenderPass(AttachmentInfo_t& attachmentInfo, sint3
 		entry.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		entry.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		entry.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		entry.initialLayout = VK_IMAGE_LAYOUT_GENERAL;
-		entry.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+		entry.initialLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
+		entry.finalLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
 		attachments_descriptions.emplace_back(entry);
 
 		numColorAttachments = i + 1;
@@ -4035,7 +4052,7 @@ VKRObjectRenderPass::VKRObjectRenderPass(AttachmentInfo_t& attachmentInfo, sint3
 	{
 		hasDepthStencilAttachment = true;
 		depth_stencil_attachments_references.attachment = (uint32)attachments_descriptions.size();
-		depth_stencil_attachments_references.layout = VK_IMAGE_LAYOUT_GENERAL;
+		depth_stencil_attachments_references.layout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
 		m_depthAttachmentFormat = attachmentInfo.depthAttachment.format;
 
 		VkAttachmentDescription entry{};
@@ -4053,8 +4070,8 @@ VKRObjectRenderPass::VKRObjectRenderPass(AttachmentInfo_t& attachmentInfo, sint3
 			entry.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 			entry.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		}
-		entry.initialLayout = VK_IMAGE_LAYOUT_GENERAL;
-		entry.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+		entry.initialLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
+		entry.finalLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
 		attachments_descriptions.emplace_back(entry);
 	}
 
@@ -4075,8 +4092,17 @@ VKRObjectRenderPass::VKRObjectRenderPass(AttachmentInfo_t& attachmentInfo, sint3
 	renderPassInfo.subpassCount = 1;
 	renderPassInfo.pSubpasses = &subpass;
 
-	renderPassInfo.pDependencies = nullptr;
-	renderPassInfo.dependencyCount = 0;
+	VkSubpassDependency dep;
+	// image reads need to happen-before color attachment writes
+	dep.dependencyFlags = VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT;
+	dep.srcStageMask = VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
+	dep.dstStageMask = VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
+	dep.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+	dep.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+	dep.srcSubpass = 0;
+	dep.dstSubpass = 0;
+	renderPassInfo.pDependencies = &dep;
+	renderPassInfo.dependencyCount = 1;
 	// before Cemu 1.25.5 we used zero here, which means implicit synchronization. For 1.25.5 it was changed to 2 (using the subpass dependencies above)
 	// Reverted this again to zero for Cemu 1.25.5b as the performance cost is just too high. Manual synchronization is preferred
 

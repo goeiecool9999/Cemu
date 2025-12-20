@@ -458,6 +458,7 @@ private:
 			bool present_wait = false; // VK_KHR_present_wait
 			bool depth_clip_enable = false; // VK_EXT_depth_clip_enable
 			bool pipeline_robustness = false; // VK_EXT_pipeline_robustness
+			bool attachment_feedback_loop_layout = false; //attachment_feedback_loop_layout
 		}deviceExtensions;
 
 		struct
@@ -544,11 +545,6 @@ private:
 	VkDescriptorSetInfo* draw_getOrCreateDescriptorSet(PipelineInfo* pipeline_info, LatteDecompilerShader* shader);
 	void draw_prepareDescriptorSets(PipelineInfo* pipeline_info, VkDescriptorSetInfo*& vertexDS, VkDescriptorSetInfo*& pixelDS, VkDescriptorSetInfo*& geometryDS);
 	void draw_handleSpecialState5();
-
-	// draw synchronization helper
-	void sync_inputTexturesChanged();
-	void sync_RenderPassLoadTextures(CachedFBOVk* fboVk);
-	void sync_RenderPassStoreTextures(CachedFBOVk* fboVk);
 
 	// command buffer
 	VkCommandBuffer getCurrentCommandBuffer() const { return m_state.currentCommandBuffer; }
