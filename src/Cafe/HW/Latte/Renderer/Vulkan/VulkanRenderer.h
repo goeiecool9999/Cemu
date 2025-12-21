@@ -408,6 +408,10 @@ private:
 			activeIndexBufferOffset = std::numeric_limits<uint32>::max();
 		}
 
+		// invalidation / flushing
+		uint64 currentFlushIndex{0};
+		bool requestFlush{ false }; // flush after every draw operation. The renderpass dependencies dont handle dependencies across multiple drawcalls inside a single renderpass
+
 		// draw sequence
 		bool drawSequenceSkip; // if true, skip draw_execute()
 	}m_state;
@@ -524,6 +528,8 @@ private:
 	PipelineInfo* draw_createGraphicsPipeline(uint32 indexCount);
 	PipelineInfo* draw_getOrCreateGraphicsPipeline(uint32 indexCount);
 
+	void EmitFeedbackLoopBarrier();
+
 	void draw_updateVkBlendConstants();
 	void draw_updateDepthBias(bool forceUpdate);
 
@@ -541,6 +547,11 @@ private:
 	VkDescriptorSetInfo* draw_getOrCreateDescriptorSet(PipelineInfo* pipeline_info, LatteDecompilerShader* shader);
 	void draw_prepareDescriptorSets(PipelineInfo* pipeline_info, VkDescriptorSetInfo*& vertexDS, VkDescriptorSetInfo*& pixelDS, VkDescriptorSetInfo*& geometryDS);
 	void draw_handleSpecialState5();
+
+	// draw synchronization helper
+	void sync_inputTexturesChanged();
+	void sync_RenderPassLoadTextures(CachedFBOVk* fboVk);
+	void sync_RenderPassStoreTextures(CachedFBOVk* fboVk);
 
 	// command buffer
 	VkCommandBuffer getCurrentCommandBuffer() const { return m_state.currentCommandBuffer; }

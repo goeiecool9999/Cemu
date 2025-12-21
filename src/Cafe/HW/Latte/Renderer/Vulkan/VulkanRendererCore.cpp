@@ -1035,6 +1035,130 @@ VkDescriptorSetInfo* VulkanRenderer::draw_getOrCreateDescriptorSet(PipelineInfo*
 	return dsInfo;
 }
 
+void VulkanRenderer::sync_inputTexturesChanged()
+{
+	bool writeFlushRequired = false;
+
+	if (m_state.activeVertexDS)
+	{
+		for (auto& tex : m_state.activeVertexDS->list_fboCandidates)
+		{
+			tex->m_vkFlushIndex_read = m_state.currentFlushIndex;
+			if (tex->m_vkFlushIndex_write == m_state.currentFlushIndex)
+				writeFlushRequired = true;
+		}
+	}
+	if (m_state.activeGeometryDS)
+	{
+		for (auto& tex : m_state.activeGeometryDS->list_fboCandidates)
+		{
+			tex->m_vkFlushIndex_read = m_state.currentFlushIndex;
+			if (tex->m_vkFlushIndex_write == m_state.currentFlushIndex)
+				writeFlushRequired = true;
+		}
+	}
+	if (m_state.activePixelDS)
+	{
+		for (auto& tex : m_state.activePixelDS->list_fboCandidates)
+		{
+			tex->m_vkFlushIndex_read = m_state.currentFlushIndex;
+			if (tex->m_vkFlushIndex_write == m_state.currentFlushIndex)
+				writeFlushRequired = true;
+		}
+	}
+	// barrier here
+	if (writeFlushRequired)
+	{
+		VkMemoryBarrier memoryBarrier{};
+		memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		memoryBarrier.srcAccessMask = 0;
+		memoryBarrier.dstAccessMask = 0;
+
+		VkPipelineStageFlags srcStage = 0;
+		VkPipelineStageFlags dstStage = 0;
+
+		// src
+		srcStage |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		memoryBarrier.srcAccessMask |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+		srcStage |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+		memoryBarrier.srcAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+		// dst
+		dstStage |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+		memoryBarrier.dstAccessMask |= VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
+
+		dstStage |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+		memoryBarrier.dstAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
+
+		vkCmdPipelineBarrier(m_state.currentCommandBuffer, srcStage, dstStage, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
+
+		performanceMonitor.vk.numDrawBarriersPerFrame.increment();
+
+		m_state.currentFlushIndex++;
+	}
+}
+
+void VulkanRenderer::sync_RenderPassLoadTextures(CachedFBOVk* fboVk)
+{
+	bool readFlushRequired = false;
+	// always called after draw_inputTexturesChanged()
+	for (auto& tex : fboVk->GetTextures())
+	{
+		LatteTextureVk* texVk = (LatteTextureVk*)tex;
+		// write-before-write
+		if (texVk->m_vkFlushIndex_write == m_state.currentFlushIndex)
+			readFlushRequired = true;
+
+
+		texVk->m_vkFlushIndex_write = m_state.currentFlushIndex;
+		// todo - also check for write-before-write ?
+		if (texVk->m_vkFlushIndex_read == m_state.currentFlushIndex)
+			readFlushRequired = true;
+	}
+	// barrier here
+	if (readFlushRequired)
+	{
+		VkMemoryBarrier memoryBarrier{};
+		memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		memoryBarrier.srcAccessMask = 0;
+		memoryBarrier.dstAccessMask = 0;
+
+		VkPipelineStageFlags srcStage = 0;
+		VkPipelineStageFlags dstStage = 0;
+
+		// src
+		srcStage |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		memoryBarrier.srcAccessMask |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+		srcStage |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+		memoryBarrier.srcAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+		// dst
+		dstStage |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+		memoryBarrier.dstAccessMask |= VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
+
+		dstStage |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+		memoryBarrier.dstAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
+
+		vkCmdPipelineBarrier(m_state.currentCommandBuffer, srcStage, dstStage, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
+
+		performanceMonitor.vk.numDrawBarriersPerFrame.increment();
+
+		m_state.currentFlushIndex++;
+	}
+}
+
+void VulkanRenderer::sync_RenderPassStoreTextures(CachedFBOVk* fboVk)
+{
+	uint32 flushIndex = m_state.currentFlushIndex;
+	for (auto& tex : fboVk->GetTextures())
+	{
+		LatteTextureVk* texVk = (LatteTextureVk*)tex;
+		texVk->m_vkFlushIndex_write = flushIndex;
+	}
+}
+
 void VulkanRenderer::draw_prepareDescriptorSets(PipelineInfo* pipeline_info, VkDescriptorSetInfo*& vertexDS, VkDescriptorSetInfo*& pixelDS, VkDescriptorSetInfo*& geometryDS)
 {
 	const auto vertexShader = LatteSHRC_GetActiveVertexShader();
@@ -1087,6 +1211,60 @@ void VulkanRenderer::draw_updateDepthBias(bool forceUpdate)
 
 bool s_syncOnNextDraw = false;
 
+void VulkanRenderer::EmitFeedbackLoopBarrier()
+{
+	CachedFBOVk* fboVk = m_state.activeRenderpassFBO;
+	size_t barrierCount = 0;
+	VkImageMemoryBarrier imageMemBarriers[8 + 2]{};
+
+	for (auto& i : fboVk->colorBuffer)
+	{
+		if (!i.texture)
+			continue;
+		VkImageSubresourceRange range = {
+			VK_IMAGE_ASPECT_COLOR_BIT,
+			(uint32_t)i.texture->firstMip,
+			(uint32_t)i.texture->numMip,
+			(uint32_t)i.texture->firstSlice,
+			(uint32_t)i.texture->numSlice};
+		auto baseTex = (LatteTextureVk*)i.texture->baseTexture;
+		const auto idx = barrierCount++;
+		imageMemBarriers[idx].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		imageMemBarriers[idx].image = baseTex->GetImageObj()->m_image;
+		imageMemBarriers[idx].subresourceRange = range;
+		imageMemBarriers[idx].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		imageMemBarriers[idx].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		imageMemBarriers[idx].oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
+		imageMemBarriers[idx].newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
+		imageMemBarriers[idx].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		imageMemBarriers[idx].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+	}
+
+	if (auto i = fboVk->depthBuffer.texture)
+	{
+		VkImageSubresourceRange range = {
+			VK_IMAGE_ASPECT_DEPTH_BIT,
+			(uint32_t)i->firstMip,
+			(uint32_t)i->numMip,
+			(uint32_t)i->firstSlice,
+			(uint32_t)i->numSlice};
+		auto baseTex = (LatteTextureVk*)i->baseTexture;
+		const auto idx = barrierCount++;
+		imageMemBarriers[idx].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		imageMemBarriers[idx].image = baseTex->GetImageObj()->m_image;
+		imageMemBarriers[idx].subresourceRange = range;
+		imageMemBarriers[idx].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		imageMemBarriers[idx].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		imageMemBarriers[idx].oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
+		imageMemBarriers[idx].newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
+		imageMemBarriers[idx].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		imageMemBarriers[idx].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+	}
+
+	vkCmdPipelineBarrier(m_state.currentCommandBuffer, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+						 VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT, 0, nullptr, 0, nullptr, barrierCount, imageMemBarriers);
+}
+
 void VulkanRenderer::draw_setRenderPass()
 {
 	CachedFBOVk* fboVk = m_state.activeFBO;
@@ -1096,72 +1274,29 @@ void VulkanRenderer::draw_setRenderPass()
 	{
 		m_state.hasRenderSelfDependency = fboVk->CheckForCollision(m_state.activeVertexDS, m_state.activeGeometryDS, m_state.activePixelDS);
 	}
-
 	auto vkObjRenderPass = fboVk->GetRenderPassObj();
 	auto vkObjFramebuffer = fboVk->GetFramebufferObj();
 
+
 	if (m_state.activeRenderpassFBO == fboVk)
 	{
-		if (m_state.hasRenderSelfDependency)
+		if (m_state.activeRenderpassFBO && m_state.hasRenderSelfDependency)
 		{
-			size_t barrierCount = 0;
-			VkImageMemoryBarrier imageMemBarriers[8 + 2]{};
-
-			for (auto& i : fboVk->colorBuffer)
-			{
-				if (!i.texture)
-					break;
-				VkImageSubresourceRange range = {
-					VK_IMAGE_ASPECT_COLOR_BIT,
-					(uint32_t)i.texture->firstMip,
-					(uint32_t)i.texture->numMip,
-					(uint32_t)i.texture->firstSlice,
-					(uint32_t)i.texture->numSlice
-				};
-				auto baseTex = (LatteTextureVk*)i.texture->baseTexture;
-				const auto idx = barrierCount++;
-				imageMemBarriers[idx].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-				imageMemBarriers[idx].image = baseTex->GetImageObj()->m_image;
-				imageMemBarriers[idx].subresourceRange = range;
-				imageMemBarriers[idx].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-				imageMemBarriers[idx].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-				imageMemBarriers[idx].oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
-				imageMemBarriers[idx].newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
-				imageMemBarriers[idx].srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-				imageMemBarriers[idx].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-			}
-
-			if (auto i = fboVk->depthBuffer.texture)
-			{
-				VkImageSubresourceRange range = {
-					VK_IMAGE_ASPECT_COLOR_BIT,
-					(uint32_t)i->firstMip,
-					(uint32_t)i->numMip,
-					(uint32_t)i->firstSlice,
-					(uint32_t)i->numSlice
-				};
-				auto baseTex = (LatteTextureVk*)i->baseTexture;
-				const auto idx = barrierCount++;
-				imageMemBarriers[idx].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-				imageMemBarriers[idx].image = baseTex->GetImageObj()->m_image;
-				imageMemBarriers[idx].subresourceRange = range;
-				imageMemBarriers[idx].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-				imageMemBarriers[idx].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-				imageMemBarriers[idx].oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
-				imageMemBarriers[idx].newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
-				imageMemBarriers[idx].srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-				imageMemBarriers[idx].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-			}
-
-			vkCmdPipelineBarrier(m_state.currentCommandBuffer, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
-				VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT, 0, nullptr, 0, nullptr, barrierCount, imageMemBarriers);
+			EmitFeedbackLoopBarrier();
 		}
 		return;
 	}
 	draw_endRenderPass();
 
-	// assume that FBO changed, update self-dependency state
-	m_state.hasRenderSelfDependency = fboVk->CheckForCollision(m_state.activeVertexDS, m_state.activeGeometryDS, m_state.activePixelDS);
+	sync_inputTexturesChanged();
+	sync_RenderPassLoadTextures(fboVk);
+
+	VkMemoryBarrier memoryBarrier{};
+	memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+	memoryBarrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+	memoryBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+
+	vkCmdPipelineBarrier(m_state.currentCommandBuffer, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
 
 	if (m_featureControl.deviceExtensions.dynamic_rendering)
 	{
@@ -1195,10 +1330,14 @@ void VulkanRenderer::draw_endRenderPass()
 {
 	if (!m_state.activeRenderpassFBO)
 		return;
+
+	vkCmdPipelineBarrier(m_state.currentCommandBuffer, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, 0, 0, nullptr, 0, nullptr, 0, nullptr);
+
 	if (m_featureControl.deviceExtensions.dynamic_rendering)
 		vkCmdEndRenderingKHR(m_state.currentCommandBuffer);
 	else
 		vkCmdEndRenderPass(m_state.currentCommandBuffer);
+	sync_RenderPassStoreTextures(m_state.activeRenderpassFBO);
 	m_state.activeRenderpassFBO = nullptr;
 }
 

@@ -78,6 +78,11 @@ protected:
 	LatteTextureView* CreateView(Latte::E_DIM dim, Latte::E_GX2SURFFMT format, sint32 firstMip, sint32 mipCount, sint32 firstSlice, sint32 sliceCount) override;
 
 public:
+	uint64 m_vkFlushIndex{}; // used to track read-write dependencies within the same renderpass
+
+	uint64 m_vkFlushIndex_read{};
+	uint64 m_vkFlushIndex_write{};
+
 	uint32 m_collisionCheckIndex{}; // used to track if texture is being both sampled and output to during drawcall
 
 private:
