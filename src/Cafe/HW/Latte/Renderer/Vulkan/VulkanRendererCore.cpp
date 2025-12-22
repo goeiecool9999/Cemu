@@ -1236,8 +1236,8 @@ void VulkanRenderer::EmitFeedbackLoopBarrier()
 		imageMemBarriers[idx].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		imageMemBarriers[idx].oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
 		imageMemBarriers[idx].newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
-		imageMemBarriers[idx].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-		imageMemBarriers[idx].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		imageMemBarriers[idx].srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+		imageMemBarriers[idx].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 	}
 
 	if (auto i = fboVk->depthBuffer.texture)
@@ -1257,12 +1257,12 @@ void VulkanRenderer::EmitFeedbackLoopBarrier()
 		imageMemBarriers[idx].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		imageMemBarriers[idx].oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
 		imageMemBarriers[idx].newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT;
-		imageMemBarriers[idx].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-		imageMemBarriers[idx].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		imageMemBarriers[idx].srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+		imageMemBarriers[idx].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 	}
 
 	vkCmdPipelineBarrier(m_state.currentCommandBuffer, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
-						 VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT, 0, nullptr, 0, nullptr, barrierCount, imageMemBarriers);
+						 VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT | VK_DEPENDENCY_BY_REGION_BIT | VK_DEPENDENCY_VIEW_LOCAL_BIT, 0, nullptr, 0, nullptr, barrierCount, imageMemBarriers);
 }
 
 void VulkanRenderer::draw_setRenderPass()
