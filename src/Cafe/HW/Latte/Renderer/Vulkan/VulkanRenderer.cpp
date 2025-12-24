@@ -4096,7 +4096,7 @@ VKRObjectRenderPass::VKRObjectRenderPass(AttachmentInfo_t& attachmentInfo, sint3
 
 	VkSubpassDependency dep;
 	// image reads need to happen-before color attachment writes
-	dep.dependencyFlags = VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT;
+	dep.dependencyFlags = VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT | VK_DEPENDENCY_VIEW_LOCAL_BIT | VK_DEPENDENCY_BY_REGION_BIT;
 	dep.srcStageMask = VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
 	dep.dstStageMask = VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
 	dep.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
