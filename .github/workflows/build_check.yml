@@ -12,6 +12,7 @@ on:
       - "*.md"
     branches:
       - main
+      - feedback_loop_fewer_barriers
 
 jobs:
   build:
