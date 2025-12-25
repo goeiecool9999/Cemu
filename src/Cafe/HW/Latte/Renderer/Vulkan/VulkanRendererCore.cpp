@@ -1213,6 +1213,8 @@ bool s_syncOnNextDraw = false;
 
 void VulkanRenderer::EmitFeedbackLoopBarrier()
 {
+	if (!m_state.activeRenderpassFBO)
+		return;
 	CachedFBOVk* fboVk = m_state.activeRenderpassFBO;
 	size_t barrierCount = 0;
 	VkImageMemoryBarrier imageMemBarriers[8 + 2]{};
@@ -1280,7 +1282,7 @@ void VulkanRenderer::draw_setRenderPass()
 
 	if (m_state.activeRenderpassFBO == fboVk)
 	{
-		if (m_state.activeRenderpassFBO && m_state.hasRenderSelfDependency)
+		if (m_state.hasRenderSelfDependency)
 		{
 			EmitFeedbackLoopBarrier();
 		}
@@ -1290,13 +1292,6 @@ void VulkanRenderer::draw_setRenderPass()
 
 	sync_inputTexturesChanged();
 	sync_RenderPassLoadTextures(fboVk);
-
-	VkMemoryBarrier memoryBarrier{};
-	memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-	memoryBarrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-	memoryBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-
-	vkCmdPipelineBarrier(m_state.currentCommandBuffer, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
 
 	if (m_featureControl.deviceExtensions.dynamic_rendering)
 	{
