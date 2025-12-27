@@ -1094,12 +1094,11 @@ void VulkanRenderer::sync_RenderPassLoadTextures(CachedFBOVk* fboVk)
 	{
 		LatteTextureVk* texVk = (LatteTextureVk*)tex;
 
-		//RAW
+		//RAW / WAW
 		if (texVk->m_vkFlushIndex_write == m_state.currentFlushIndex)
 			flushRequired = true;
 
-		if ((texVk->GetImageAspect() | VK_IMAGE_ASPECT_DEPTH_BIT) != 0)
-			texVk->m_vkFlushIndex_read = m_state.currentFlushIndex;
+		texVk->m_vkFlushIndex_read = m_state.currentFlushIndex;
 	}
 	if (flushRequired)
 		sync_performFlushBarrier();
@@ -1113,9 +1112,6 @@ void VulkanRenderer::sync_RenderPassStoreTextures(CachedFBOVk* fboVk)
 		LatteTextureVk* texVk = (LatteTextureVk*)tex;
 		//WAR
 		if (texVk->m_vkFlushIndex_read == m_state.currentFlushIndex)
-			flushRequired = true;
-		//WAW
-		if (texVk->m_vkFlushIndex_write == m_state.currentFlushIndex)
 			flushRequired = true;
 		texVk->m_vkFlushIndex_write = m_state.currentFlushIndex;
 	}
@@ -1240,6 +1236,7 @@ void VulkanRenderer::draw_setRenderPass()
 	{
 		m_state.hasRenderSelfDependency = fboVk->CheckForCollision(m_state.activeVertexDS, m_state.activeGeometryDS, m_state.activePixelDS);
 	}
+
 	auto vkObjRenderPass = fboVk->GetRenderPassObj();
 	auto vkObjFramebuffer = fboVk->GetFramebufferObj();
 
