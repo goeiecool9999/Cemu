@@ -118,7 +118,12 @@ public:
 	RendererShaderVk* rectEmulationGS = nullptr;
 
 	// hack - accurate barrier needed for this pipeline
-	bool neverSkipAccurateBarrier{false};
+	enum class BarrierOverride
+	{
+		NONE,
+		ALWAYS,
+		NEVER
+	} accurateBarrierOverride{BarrierOverride::NONE};
 };
 
 namespace WindowSystem
