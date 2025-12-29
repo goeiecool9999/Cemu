@@ -2707,7 +2707,8 @@ bool VulkanRenderer::AcquireNextSwapchainImage(bool mainWindow)
 	if (!result)
 		return false;
 
-	draw_endRenderPass();
+	// submit now so previous work does not depend on the acquire semaphore operation.
+	SubmitCommandBuffer();
 	// make sure that the event is set in a command buffer that waits on the acquire semaphore signal to execute.
 	m_nextWaitSemaphore.emplace_back(chainInfo.ConsumeAcquireSemaphore());
 	vkCmdSetEvent(m_state.currentCommandBuffer, chainInfo.m_imageAcquireEvents[chainInfo.swapchainImageIndex], VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
