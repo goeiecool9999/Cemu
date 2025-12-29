@@ -1996,29 +1996,28 @@ void VulkanRenderer::SubmitCommandBuffer()
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &m_state.currentCommandBuffer;
 
-	VkSemaphore signalSem = VK_NULL_HANDLE;
 	// signal current command buffer semaphore
-	if (m_nextSignalSemaphore != VK_NULL_HANDLE)
+	VkSemaphore signalSemArray[2];
+	for (size_t i = 0; i < m_nextSignalSemaphore.size(); i++)
 	{
-		signalSem = m_nextSignalSemaphore;
-		submitInfo.signalSemaphoreCount = 1;
-		submitInfo.pSignalSemaphores = &signalSem;
-		m_nextSignalSemaphore = VK_NULL_HANDLE;
+		signalSemArray[i] = m_nextSignalSemaphore[i];
 	}
+	submitInfo.signalSemaphoreCount = m_nextSignalSemaphore.size();
+	submitInfo.pSignalSemaphores = signalSemArray;
+	m_nextSignalSemaphore.clear();
 
 	// wait for previous command buffer semaphore
-	const VkPipelineStageFlags semWaitStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	const VkPipelineStageFlags semWaitStageMask[2] = { VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT };
 
-	submitInfo.waitSemaphoreCount = 0;
-	VkSemaphore waitSem = VK_NULL_HANDLE;
-	if (m_nextWaitSemaphore != VK_NULL_HANDLE)
+	VkSemaphore waitSemArray[2];
+	for (size_t i = 0; i < m_nextWaitSemaphore.size(); i++)
 	{
-		waitSem = m_nextWaitSemaphore;
-		submitInfo.waitSemaphoreCount = 1;
-		submitInfo.pWaitSemaphores = &waitSem;
-		m_nextWaitSemaphore = VK_NULL_HANDLE;
+		waitSemArray[i] = m_nextWaitSemaphore[i];
 	}
-	submitInfo.pWaitDstStageMask = &semWaitStageMask;
+	submitInfo.waitSemaphoreCount = m_nextWaitSemaphore.size();
+	m_nextWaitSemaphore.clear();
+	submitInfo.pWaitDstStageMask = semWaitStageMask;
+	submitInfo.pWaitSemaphores = waitSemArray;
 
 	const VkResult result = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, m_cmd_buffer_fences[m_commandBufferIndex]);
 	if (result != VK_SUCCESS)
@@ -2710,7 +2709,7 @@ bool VulkanRenderer::AcquireNextSwapchainImage(bool mainWindow)
 
 	draw_endRenderPass();
 	// make sure that the event is set in a command buffer that waits on the acquire semaphore signal to execute.
-	m_nextWaitSemaphore = chainInfo.ConsumeAcquireSemaphore();
+	m_nextWaitSemaphore.emplace_back(chainInfo.ConsumeAcquireSemaphore());
 	vkCmdSetEvent(m_state.currentCommandBuffer, chainInfo.m_imageAcquireEvents[chainInfo.swapchainImageIndex], VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
 	return true;
 }
@@ -2803,7 +2802,7 @@ void VulkanRenderer::SwapBuffer(bool mainWindow)
 
 	// when the current command buffer finishes execution, and thus the acquire semaphore is signaled and the last write to the swapchain image completed, signal the present semaphore.
 	VkSemaphore presentSemaphore = chainInfo.m_presentSemaphores[chainInfo.swapchainImageIndex];
-	m_nextSignalSemaphore = presentSemaphore;
+	m_nextSignalSemaphore.emplace_back(presentSemaphore);
 
 	SubmitCommandBuffer();
 

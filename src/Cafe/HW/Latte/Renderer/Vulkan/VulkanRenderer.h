@@ -8,6 +8,7 @@
 #include "Cafe/HW/Latte/Renderer/Vulkan/CachedFBOVk.h"
 #include "Cafe/HW/Latte/Renderer/Vulkan/VKRMemoryManager.h"
 #include "Cafe/HW/Latte/Renderer/Vulkan/SwapchainInfoVk.h"
+#include "boost/container/static_vector.hpp"
 #include "util/math/vector2.h"
 #include "util/helpers/Semaphore.h"
 #include "util/containers/flat_hash_map.hpp"
@@ -655,8 +656,8 @@ private:
 	size_t m_commandBufferIndex = 0; // current buffer being filled
 	size_t m_commandBufferSyncIndex = 0; // latest buffer that finished execution (updated on submit)
 	size_t m_commandBufferIDOfPrevFrame = 0;
-	VkSemaphore m_nextWaitSemaphore = VK_NULL_HANDLE;
-	VkSemaphore m_nextSignalSemaphore = VK_NULL_HANDLE;
+	boost::container::static_vector<VkSemaphore, 2> m_nextWaitSemaphore{};
+	boost::container::static_vector<VkSemaphore, 2> m_nextSignalSemaphore{};
 	std::array<size_t, kCommandBufferPoolSize> m_cmdBufferUniformRingbufIndices {}; // index in the uniform ringbuffer
 	std::array<VkFence, kCommandBufferPoolSize> m_cmd_buffer_fences;
 	std::array<VkCommandBuffer, kCommandBufferPoolSize> m_commandBuffers;
