@@ -516,7 +516,7 @@ private:
 
 	// imgui
 	bool ImguiBegin(bool mainWindow) override;
-	void ImguiEnd(bool mainWindow) override;
+	void ImguiEnd() override;
 	ImTextureID GenerateTexture(const std::vector<uint8>& data, const Vector2i& size) override;
 	void DeleteTexture(ImTextureID id) override;
 	void DeleteFontTextures() override;
@@ -550,11 +550,6 @@ private:
 	void sync_inputTexturesChanged();
 	void sync_RenderPassLoadTextures(CachedFBOVk* fboVk);
 	void sync_RenderPassStoreTextures(CachedFBOVk* fboVk);
-
-	// present synchronization helper
-	void sync_waitSignaledLastDrawEvent(bool mainWindow);
-	void sync_signalLastDrawEvent(bool mainWindow);
-	void sync_waitForAcquireEvent(bool mainWindow);
 
 	// command buffer
 	VkCommandBuffer getCurrentCommandBuffer() const { return m_state.currentCommandBuffer; }

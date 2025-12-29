@@ -207,9 +207,7 @@ VKFUNC_DEVICE(vkCmdCopyQueryPoolResults);
 
 // event
 VKFUNC_DEVICE(vkCreateEvent);
-VKFUNC_DEVICE(vkResetEvent);
 VKFUNC_DEVICE(vkCmdSetEvent);
-VKFUNC_DEVICE(vkCmdResetEvent);
 VKFUNC_DEVICE(vkCmdWaitEvents);
 VKFUNC_DEVICE(vkGetEventStatus);
 VKFUNC_DEVICE(vkDestroyEvent);

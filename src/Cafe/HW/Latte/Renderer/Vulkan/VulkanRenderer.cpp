@@ -1839,7 +1839,6 @@ bool VulkanRenderer::ImguiBegin(bool mainWindow)
 	draw_endRenderPass();
 	m_state.currentPipeline = VK_NULL_HANDLE;
 
-	sync_waitForAcquireEvent(mainWindow);
 	ImGui_ImplVulkan_CreateFontsTexture(m_state.currentCommandBuffer);
 	ImGui_ImplVulkan_NewFrame(m_state.currentCommandBuffer, chainInfo.m_swapchainFramebuffers[chainInfo.swapchainImageIndex], chainInfo.getExtent());
 	ImGui_UpdateWindowInformation(mainWindow);
@@ -1847,12 +1846,11 @@ bool VulkanRenderer::ImguiBegin(bool mainWindow)
 	return true;
 }
 
-void VulkanRenderer::ImguiEnd(bool mainWindow)
+void VulkanRenderer::ImguiEnd()
 {
 	ImGui::Render();
 	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), m_state.currentCommandBuffer);
 	vkCmdEndRenderPass(m_state.currentCommandBuffer);
-	sync_signalLastDrawEvent(mainWindow);
 }
 
 ImTextureID VulkanRenderer::GenerateTexture(const std::vector<uint8>& data, const Vector2i& size)
@@ -1896,12 +1894,8 @@ bool VulkanRenderer::BeginFrame(bool mainWindow)
 
 	auto& chainInfo = GetChainInfo(mainWindow);
 
-	sync_waitForAcquireEvent(mainWindow);
-
 	VkClearColorValue clearColor{ 0, 0, 0, 0 };
 	ClearColorImageRaw(chainInfo.m_swapchainImages[chainInfo.swapchainImageIndex], 0, 0, clearColor, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-
-	sync_signalLastDrawEvent(mainWindow);
 
 	// mark current swapchain image as well-defined
 	chainInfo.hasDefinedSwapchainImage = true;
@@ -2711,7 +2705,6 @@ bool VulkanRenderer::AcquireNextSwapchainImage(bool mainWindow)
 	SubmitCommandBuffer();
 	// make sure that the event is set in a command buffer that waits on the acquire semaphore signal to execute.
 	m_nextWaitSemaphore.emplace_back(chainInfo.ConsumeAcquireSemaphore());
-	vkCmdSetEvent(m_state.currentCommandBuffer, chainInfo.m_imageAcquireEvents[chainInfo.swapchainImageIndex], VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
 	return true;
 }
 
@@ -2789,17 +2782,12 @@ void VulkanRenderer::SwapBuffer(bool mainWindow)
 
 	if (!chainInfo.hasDefinedSwapchainImage)
 	{
-		sync_waitForAcquireEvent(mainWindow);
 		// set the swapchain image to a defined state
 		VkClearColorValue clearColor{ 0, 0, 0, 0 };
 		ClearColorImageRaw(chainInfo.m_swapchainImages[chainInfo.swapchainImageIndex], 0, 0, clearColor, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-		sync_signalLastDrawEvent(mainWindow);
 	}
 
 	const size_t currentFrameCmdBufferID = GetCurrentCommandBufferId();
-
-	// waiting for the last write event also waits for the acquire event, and thus the acquire semaphore.
-	sync_waitSignaledLastDrawEvent(mainWindow);
 
 	// when the current command buffer finishes execution, and thus the acquire semaphore is signaled and the last write to the swapchain image completed, signal the present semaphore.
 	VkSemaphore presentSemaphore = chainInfo.m_presentSemaphores[chainInfo.swapchainImageIndex];
@@ -3014,8 +3002,6 @@ void VulkanRenderer::DrawBackbufferQuad(LatteTextureView* texView, RendererOutpu
 
 	auto descriptSet = backbufferBlit_createDescriptorSet(m_swapchainDescriptorSetLayout, texViewVk, useLinearTexFilter);
 
-	sync_waitForAcquireEvent(!padView);
-
 	vkCmdBeginRenderPass(m_state.currentCommandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
 	if (clearBackground)
@@ -3066,8 +3052,6 @@ void VulkanRenderer::DrawBackbufferQuad(LatteTextureView* texView, RendererOutpu
 	vkCmdDraw(m_state.currentCommandBuffer, 6, 1, 0, 0);
 
 	vkCmdEndRenderPass(m_state.currentCommandBuffer);
-
-	sync_signalLastDrawEvent(!padView);
 
 	// restore viewport
 	vkCmdSetViewport(m_state.currentCommandBuffer, 0, 1, &m_state.currentViewport);

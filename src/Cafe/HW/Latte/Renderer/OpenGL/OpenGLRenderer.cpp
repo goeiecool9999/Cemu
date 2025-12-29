@@ -177,7 +177,7 @@ bool OpenGLRenderer::ImguiBegin(bool mainWindow)
 	return true;
 }
 
-void OpenGLRenderer::ImguiEnd(bool mainWindow)
+void OpenGLRenderer::ImguiEnd()
 {
 	ImGui::Render();
 	ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
