@@ -153,6 +153,22 @@ void SwapchainInfoVk::Create()
 	if (result != VK_SUCCESS)
 		UnrecoverableError("Failed to create fence for swapchain");
 
+	m_lastImageWriteEvents.resize(m_swapchainImages.size());
+	VkEventCreateInfo eventInfo = {};
+	eventInfo.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+	m_imageAcquireEvents.resize(m_swapchainImages.size());
+	for (auto& event: m_imageAcquireEvents)
+	{
+		if (vkCreateEvent(m_logicalDevice, &eventInfo, nullptr, &event) != VK_SUCCESS)
+			UnrecoverableError("Failed to create event for swapchain present");
+	}
+	eventInfo.flags = VK_EVENT_CREATE_DEVICE_ONLY_BIT;
+	for (auto& event: m_lastImageWriteEvents)
+	{
+		if (vkCreateEvent(m_logicalDevice, &eventInfo, nullptr, &event) != VK_SUCCESS)
+			UnrecoverableError("Failed to create event for swapchain present");
+	}
+
 	m_acquireIndex = 0;
 	hasDefinedSwapchainImage = false;
 
@@ -192,6 +208,15 @@ void SwapchainInfoVk::Cleanup()
 		vkDestroyFence(m_logicalDevice, m_imageAvailableFence, nullptr);
 		m_imageAvailableFence = nullptr;
 	}
+
+	for (auto& ev : m_imageAcquireEvents)
+		vkDestroyEvent(m_logicalDevice, ev, nullptr);
+	m_imageAcquireEvents.clear();
+
+	for (auto& ev : m_lastImageWriteEvents)
+		vkDestroyEvent(m_logicalDevice, ev, nullptr);
+	m_lastImageWriteEvents.clear();
+
 	if (m_swapchain)
 	{
 		vkDestroySwapchainKHR(m_logicalDevice, m_swapchain, nullptr);
@@ -226,6 +251,8 @@ VkSemaphore SwapchainInfoVk::ConsumeAcquireSemaphore()
 bool SwapchainInfoVk::AcquireImage()
 {
 	ResetAvailableFence();
+	VkEvent acquireEvent = m_imageAcquireEvents[m_acquireIndex];
+	vkResetEvent(m_logicalDevice, acquireEvent);
 
 	VkSemaphore acquireSemaphore = m_acquireSemaphores[m_acquireIndex];
 	VkResult result = vkAcquireNextImageKHR(m_logicalDevice, m_swapchain, 1'000'000'000, acquireSemaphore, m_imageAvailableFence, &swapchainImageIndex);

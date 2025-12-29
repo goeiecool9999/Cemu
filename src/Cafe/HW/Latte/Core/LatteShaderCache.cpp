@@ -479,13 +479,13 @@ void LatteShaderCache_Load()
 	if (g_renderer->ImguiBegin(true))
 	{
 		LatteShaderCache_drawBackgroundImage(g_shaderCacheLoaderState.textureTVId, 1280, 720);
-		g_renderer->ImguiEnd();
+		g_renderer->ImguiEnd(true);
 	}
 	g_renderer->BeginFrame(false);
 	if (g_renderer->ImguiBegin(false))
 	{
 		LatteShaderCache_drawBackgroundImage(g_shaderCacheLoaderState.textureDRCId, 854, 480);
-		g_renderer->ImguiEnd();
+		g_renderer->ImguiEnd(false);
 	}
 
 	g_renderer->SwapBuffers(true, true);
@@ -616,7 +616,7 @@ void LatteShaderCache_ShowProgress(const std::function <bool(void)>& loadUpdateF
 				ImGui::PopStyleColor();
 				ImGui::PopFont();
 			}
-			g_renderer->ImguiEnd();
+			g_renderer->ImguiEnd(true);
 			lastFrameUpdate = tick_cached();
 		}
 
@@ -624,7 +624,7 @@ void LatteShaderCache_ShowProgress(const std::function <bool(void)>& loadUpdateF
 		if (g_renderer->ImguiBegin(false))
 		{
 			LatteShaderCache_drawBackgroundImage(g_shaderCacheLoaderState.textureDRCId, 854, 480);
-			g_renderer->ImguiEnd();
+			g_renderer->ImguiEnd(false);
 		}
 
 		// finish frame

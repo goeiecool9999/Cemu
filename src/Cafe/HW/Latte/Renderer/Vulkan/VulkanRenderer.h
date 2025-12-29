@@ -237,7 +237,7 @@ public:
 	void InitFirstCommandBuffer();
 	void ProcessFinishedCommandBuffers();
 	void WaitForNextFinishedCommandBuffer();
-	void SubmitCommandBuffer(VkSemaphore signalSemaphore = VK_NULL_HANDLE, VkSemaphore waitSemaphore = VK_NULL_HANDLE);
+	void SubmitCommandBuffer();
 	void RequestSubmitSoon();
 	void RequestSubmitOnIdle();
 
@@ -515,7 +515,7 @@ private:
 
 	// imgui
 	bool ImguiBegin(bool mainWindow) override;
-	void ImguiEnd() override;
+	void ImguiEnd(bool mainWindow) override;
 	ImTextureID GenerateTexture(const std::vector<uint8>& data, const Vector2i& size) override;
 	void DeleteTexture(ImTextureID id) override;
 	void DeleteFontTextures() override;
@@ -549,6 +549,11 @@ private:
 	void sync_inputTexturesChanged();
 	void sync_RenderPassLoadTextures(CachedFBOVk* fboVk);
 	void sync_RenderPassStoreTextures(CachedFBOVk* fboVk);
+
+	// present synchronization helper
+	void sync_waitSignaledLastDrawEvent(bool mainWindow);
+	void sync_signalLastDrawEvent(bool mainWindow);
+	void sync_waitForAcquireEvent(bool mainWindow);
 
 	// command buffer
 	VkCommandBuffer getCurrentCommandBuffer() const { return m_state.currentCommandBuffer; }
@@ -650,15 +655,11 @@ private:
 	size_t m_commandBufferIndex = 0; // current buffer being filled
 	size_t m_commandBufferSyncIndex = 0; // latest buffer that finished execution (updated on submit)
 	size_t m_commandBufferIDOfPrevFrame = 0;
+	VkSemaphore m_nextWaitSemaphore = VK_NULL_HANDLE;
+	VkSemaphore m_nextSignalSemaphore = VK_NULL_HANDLE;
 	std::array<size_t, kCommandBufferPoolSize> m_cmdBufferUniformRingbufIndices {}; // index in the uniform ringbuffer
 	std::array<VkFence, kCommandBufferPoolSize> m_cmd_buffer_fences;
 	std::array<VkCommandBuffer, kCommandBufferPoolSize> m_commandBuffers;
-	std::array<VkSemaphore, kCommandBufferPoolSize> m_commandBufferSemaphores;
-
-	VkSemaphore GetLastSubmittedCmdBufferSemaphore()
-	{
-		return m_commandBufferSemaphores[(m_commandBufferIndex + m_commandBufferSemaphores.size() - 1) % m_commandBufferSemaphores.size()];
-	}
 
 	uint64 m_numSubmittedCmdBuffers{};
 	uint64 m_countCommandBufferFinished{};

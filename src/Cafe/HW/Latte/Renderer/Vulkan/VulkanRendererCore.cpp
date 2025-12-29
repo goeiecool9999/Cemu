@@ -1158,6 +1158,34 @@ void VulkanRenderer::sync_RenderPassStoreTextures(CachedFBOVk* fboVk)
 		texVk->m_vkFlushIndex_write = flushIndex;
 	}
 }
+void VulkanRenderer::sync_waitSignaledLastDrawEvent(bool mainWindow)
+{
+	auto& chainInfo = GetChainInfo(mainWindow);
+	if (chainInfo.m_signalledLastImageWrite != VK_NULL_HANDLE)
+	{
+		vkCmdWaitEvents(m_state.currentCommandBuffer, 1, &chainInfo.m_lastImageWriteEvents[chainInfo.swapchainImageIndex], VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, nullptr, 0, nullptr, 0, nullptr);
+		vkCmdPipelineBarrier(m_state.currentCommandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 0, nullptr);
+		vkCmdResetEvent(m_state.currentCommandBuffer, chainInfo.m_signalledLastImageWrite, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
+		vkCmdPipelineBarrier(m_state.currentCommandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 0, nullptr);
+		chainInfo.m_signalledLastImageWrite = VK_NULL_HANDLE;
+	}
+}
+
+void VulkanRenderer::sync_signalLastDrawEvent(bool mainWindow)
+{
+	auto& chainInfo = GetChainInfo(mainWindow);
+	sync_waitSignaledLastDrawEvent(mainWindow);
+	auto event = chainInfo.m_lastImageWriteEvents[chainInfo.swapchainImageIndex];
+	vkCmdSetEvent(m_state.currentCommandBuffer, event, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
+	chainInfo.m_signalledLastImageWrite = event;
+}
+
+
+void VulkanRenderer::sync_waitForAcquireEvent(bool mainWindow)
+{
+	auto& chainInfo = GetChainInfo(mainWindow);
+	vkCmdWaitEvents(m_state.currentCommandBuffer, 1, &chainInfo.m_imageAcquireEvents[chainInfo.swapchainImageIndex], VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, nullptr, 0, nullptr, 0, nullptr);
+}
 
 void VulkanRenderer::draw_prepareDescriptorSets(PipelineInfo* pipeline_info, VkDescriptorSetInfo*& vertexDS, VkDescriptorSetInfo*& pixelDS, VkDescriptorSetInfo*& geometryDS)
 {

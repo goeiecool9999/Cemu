@@ -41,7 +41,7 @@ public:
 
 	// imgui
 	bool ImguiBegin(bool mainWindow) override;
-	void ImguiEnd() override;
+	void ImguiEnd(bool mainWindow) override;
 	ImTextureID GenerateTexture(const std::vector<uint8>& data, const Vector2i& size) override;
 	void DeleteTexture(ImTextureID id) override;
 	void DeleteFontTextures() override;

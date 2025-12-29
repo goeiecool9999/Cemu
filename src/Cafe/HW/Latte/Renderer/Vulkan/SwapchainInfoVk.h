@@ -81,6 +81,9 @@ struct SwapchainInfoVk
 	std::vector<VkImageView> m_swapchainImageViews;
 	std::vector<VkFramebuffer> m_swapchainFramebuffers;
 	std::vector<VkSemaphore> m_presentSemaphores; // indexed by swapchainImageIndex
+	std::vector<VkEvent> m_imageAcquireEvents; // indexed by m_acquireIndex
+	std::vector<VkEvent> m_lastImageWriteEvents; // indexed by m_acquireIndex
+	VkEvent m_signalledLastImageWrite = VK_NULL_HANDLE;
 
 	VkRenderPass m_swapchainRenderPass = nullptr;
 

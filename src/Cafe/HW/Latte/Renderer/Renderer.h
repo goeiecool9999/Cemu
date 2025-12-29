@@ -83,7 +83,7 @@ public:
 
 	// imgui
 	virtual bool ImguiBegin(bool mainWindow);
-	virtual void ImguiEnd() = 0;
+	virtual void ImguiEnd(bool mainWindow) = 0;
 	virtual ImTextureID GenerateTexture(const std::vector<uint8>& data, const Vector2i& size) = 0;
 	virtual void DeleteTexture(ImTextureID id) = 0;
 	virtual void DeleteFontTextures() = 0;
