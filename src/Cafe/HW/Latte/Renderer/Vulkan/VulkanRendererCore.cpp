@@ -1245,7 +1245,7 @@ void VulkanRenderer::draw_setRenderPass()
 
 	const bool FBOChanged = m_state.activeRenderpassFBO != fboVk;
 
-	const bool inputSyncNecessary = sync_isInputTexturesSyncRequired();
+	const bool inputSyncNecessary = m_state.descriptorSetsChanged && sync_isInputTexturesSyncRequired();
 
 	const bool passReusable = !FBOChanged && !inputSyncNecessary;
 
