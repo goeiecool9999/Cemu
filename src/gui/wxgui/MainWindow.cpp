@@ -1147,13 +1147,13 @@ void MainWindow::OnDebugDumpGeneric(wxCommandEvent& event)
 	{
 		try
 		{
-			fs::create_directories(ActiveSettings::GetUserDataPath("dump/shaders"));
+			fs::create_directories(ActiveSettings::GetUserDataPath(dumpSubpath));
 		}
 		catch (const std::exception & ex)
 		{
 			SystemException sys(ex);
-			cemuLog_log(LogType::Force, "can't create shaders dump folder: {}", ex.what());
-			ActiveSettings::EnableDumpShaders(false);
+			cemuLog_log(LogType::Force, "can't create folder {} in user data folder: {}", dumpSubpath, ex.what());
+			setDumpState(false);
 		}
 	}
 }
@@ -2176,9 +2176,8 @@ void MainWindow::RecreateMenu()
 	}
 	else
 	{
-		// add 'Stop emulation' menu entry to file menu
 #ifdef CEMU_DEBUG_ASSERT
-		m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_END_EMULATION, _("Stop emulation"));
+		m_fileMenu->Append(MAINFRAME_MENU_ID_FILE_END_EMULATION, _("Close game"));
 		m_fileMenuSeparator1 = m_fileMenu->AppendSeparator();
 #endif
 	}
