@@ -567,7 +567,7 @@ private:
 	void streamout_setupXfbBuffer(uint32 bufferIndex, sint32 ringBufferOffset, uint32 rangeAddr, uint32 rangeSize) override;
 	void streamout_begin() override;
 	void streamout_applyTransformFeedbackState();
-	void bufferCache_copyStreamoutToMainBuffer(uint32 srcOffset, uint32 dstOffset, uint32 size) override;
+	void bufferCache_copyStreamoutToMainBuffer(uint32 srcOffset, uint32 dstOffset, uint32 size) override {};
 	void streamout_rendererFinishDrawcall() override;
 
 	// occlusion queries
@@ -604,10 +604,6 @@ private:
 	uint8* m_uniformVarBufferPtr = nullptr;
 	uint32 m_uniformVarBufferWriteIndex = 0;
 	uint32 m_uniformVarBufferReadIndex = 0;
-
-	// transform feedback ringbuffer
-	VkBuffer m_xfbRingBuffer = VK_NULL_HANDLE;
-	VkDeviceMemory m_xfbRingBufferMemory = VK_NULL_HANDLE;
 
 	// buffer cache (attributes, uniforms and streamout)
 	VkBuffer m_bufferCache = VK_NULL_HANDLE;
@@ -683,7 +679,8 @@ private:
 		struct
 		{
 			bool enabled;
-			uint32 ringBufferOffset;
+			uint32 addr;
+			uint32 size;
 		}buffer[LATTE_NUM_STREAMOUT_BUFFER];
 		sint32 verticesPerInstance;
 	}m_streamoutState{};

@@ -11,6 +11,7 @@
 #include "Cafe/OS/libs/gx2/GX2.h"
 #include "imgui/imgui_impl_vulkan.h"
 #include "Cafe/GameProfile/GameProfile.h"
+#include "HW/Latte/Core/LatteBufferCache.h"
 #include "util/helpers/helpers.h"
 
 extern bool hasValidFramebufferAttached;
@@ -449,7 +450,7 @@ void VulkanRenderer::uniformData_updateUniformVars(uint32 shaderStageIndex, Latt
 			{
 				if (shader->uniform.loc_streamoutBufferBase[b] >= 0)
 				{
-					*(uint32*)GET_UNIFORM_DATA_PTR(shader->uniform.loc_streamoutBufferBase[b]) = m_streamoutState.buffer[b].ringBufferOffset;
+					*(uint32*)GET_UNIFORM_DATA_PTR(shader->uniform.loc_streamoutBufferBase[b]) = LatteBufferCache_retrieveDataInCache(m_streamoutState.buffer[b].addr, m_streamoutState.buffer[b].size);
 				}
 			}
 		}
@@ -991,7 +992,7 @@ VkDescriptorSetInfo* VulkanRenderer::draw_getOrCreateDescriptorSet(PipelineInfo*
 
 	if (shader->resourceMapping.tfStorageBindingPoint >= 0)
 	{
-		tfStorageBufferInfo.buffer = m_xfbRingBuffer;
+		tfStorageBufferInfo.buffer = m_bufferCache;
 		tfStorageBufferInfo.offset = 0; // offset is calculated in shader
 		tfStorageBufferInfo.range = VK_WHOLE_SIZE;
 
@@ -1574,6 +1575,20 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 		vkCmdBindDescriptorSets(m_state.currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 			vkObjPipeline->m_pipelineLayout, 2, 1, &geometryDS->m_vkObjDescriptorSet->descriptorSet, numDynOffsets,
 			dynamicOffsets);
+	}
+
+	if (LatteGPUState.contextRegister[mmVGT_STRMOUT_EN] != 0 && !isFirst)
+	{
+		VkBufferMemoryBarrier barrier{};
+		barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		barrier.buffer = m_bufferCache;
+		barrier.offset = 0;
+		barrier.size = VK_WHOLE_SIZE;
+		barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		barrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+		vkCmdPipelineBarrier(m_state.currentCommandBuffer, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0, 0, nullptr, 1, &barrier, 0, nullptr);
 	}
 
 	// draw

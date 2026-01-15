@@ -637,9 +637,6 @@ VulkanRenderer::VulkanRenderer()
 	vkMapMemory(m_logicalDevice, m_textureReadbackBufferMemory, 0, VK_WHOLE_SIZE, 0, &bufferPtr);
 	m_textureReadbackBufferPtr = (uint8*)bufferPtr;
 
-	// transform feedback ringbuffer
-	memoryManager->CreateBuffer(LatteStreamout_GetRingBufferSize(), VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | (m_featureControl.mode.useTFEmulationViaSSBO ? VK_BUFFER_USAGE_STORAGE_BUFFER_BIT : 0), 0, m_xfbRingBuffer, m_xfbRingBufferMemory);
-
 	// occlusion query result buffer
 	if (!memoryManager->CreateBuffer(OCCLUSION_QUERY_POOL_SIZE * sizeof(uint64), VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, m_occlusionQueries.bufferQueryResults, m_occlusionQueries.memoryQueryResults))
 	{
@@ -702,7 +699,6 @@ VulkanRenderer::~VulkanRenderer()
 	// delete buffers
 	memoryManager->DeleteBuffer(m_uniformVarBuffer, m_uniformVarBufferMemory);
 	memoryManager->DeleteBuffer(m_textureReadbackBuffer, m_textureReadbackBufferMemory);
-	memoryManager->DeleteBuffer(m_xfbRingBuffer, m_xfbRingBufferMemory);
 	memoryManager->DeleteBuffer(m_occlusionQueries.bufferQueryResults, m_occlusionQueries.memoryQueryResults);
 	memoryManager->DeleteBuffer(m_bufferCache, m_bufferCacheMemory);
 
@@ -3570,9 +3566,9 @@ uint64 VulkanRenderer::GenUniqueId()
 
 void VulkanRenderer::streamout_setupXfbBuffer(uint32 bufferIndex, sint32 ringBufferOffset, uint32 rangeAddr, uint32 rangeSize)
 {
-	VkDeviceSize tfBufferOffset = ringBufferOffset;
 	m_streamoutState.buffer[bufferIndex].enabled = true;
-	m_streamoutState.buffer[bufferIndex].ringBufferOffset = ringBufferOffset;
+	m_streamoutState.buffer[bufferIndex].addr = rangeAddr;
+	m_streamoutState.buffer[bufferIndex].size = rangeSize;
 }
 
 void VulkanRenderer::streamout_begin()
@@ -3595,8 +3591,8 @@ void VulkanRenderer::streamout_applyTransformFeedbackState()
 		{
 			if (m_streamoutState.buffer[i].enabled)
 			{
-				VkBuffer tfBuffer = m_xfbRingBuffer;
-				VkDeviceSize tfBufferOffset = m_streamoutState.buffer[i].ringBufferOffset;
+				VkBuffer tfBuffer = m_bufferCache;
+				VkDeviceSize tfBufferOffset = LatteBufferCache_retrieveDataInCache(m_streamoutState.buffer[i].addr, m_streamoutState.buffer[i].size);
 				VkDeviceSize tfBufferSize = VK_WHOLE_SIZE;
 				vkCmdBindTransformFeedbackBuffersEXT(m_state.currentCommandBuffer, i, 1, &tfBuffer, &tfBufferOffset, &tfBufferSize);
 			}
@@ -3713,7 +3709,7 @@ void VulkanRenderer::bufferCache_upload(uint8* buffer, sint32 size, uint32 buffe
 	vkMemAllocator.FlushReservation(uploadResv);
 
 	barrier_bufferRange<ANY_TRANSFER | HOST_WRITE, ANY_TRANSFER,
-		BUFFER_SHADER_READ, TRANSFER_WRITE>(
+		BUFFER_SHADER_READ | BUFFER_SHADER_WRITE, TRANSFER_WRITE>(
 			uploadResv.vkBuffer, uploadResv.bufferOffset, uploadResv.size, // make sure any in-flight transfers are completed
 			m_bufferCache, bufferOffset, size); // make sure all reads are completed before we overwrite the data
 
@@ -3741,36 +3737,6 @@ void VulkanRenderer::bufferCache_copy(uint32 srcOffset, uint32 dstOffset, uint32
 	bufferCopy.dstOffset = dstOffset;
 	bufferCopy.size = size;
 	vkCmdCopyBuffer(m_state.currentCommandBuffer, m_bufferCache, m_bufferCache, 1, &bufferCopy);
-
-	barrier_sequentializeTransfer();
-}
-
-void VulkanRenderer::bufferCache_copyStreamoutToMainBuffer(uint32 srcOffset, uint32 dstOffset, uint32 size)
-{
-	draw_endRenderPass();
-
-	VkBuffer dstBuffer;
-	if (m_useHostMemoryForCache)
-	{
-		// in host memory mode, dstOffset is physical address instead of cache address
-		dstBuffer = m_importedMem;
-		dstOffset -= m_importedMemBaseAddress;
-	}
-	else
-		dstBuffer = m_bufferCache;
-
-	barrier_bufferRange<BUFFER_SHADER_WRITE, TRANSFER_READ,
-		ANY_TRANSFER | BUFFER_SHADER_READ, TRANSFER_WRITE>(
-			m_xfbRingBuffer, srcOffset, size, // wait for all writes to finish
-			dstBuffer, dstOffset, size); // wait for all reads to finish
-
-	barrier_sequentializeTransfer();
-
-	VkBufferCopy bufferCopy{};
-	bufferCopy.srcOffset = srcOffset;
-	bufferCopy.dstOffset = dstOffset;
-	bufferCopy.size = size;
-	vkCmdCopyBuffer(m_state.currentCommandBuffer, m_xfbRingBuffer, dstBuffer, 1, &bufferCopy);
 
 	barrier_sequentializeTransfer();
 }
@@ -4079,8 +4045,15 @@ VKRObjectRenderPass::VKRObjectRenderPass(AttachmentInfo_t& attachmentInfo, sint3
 	renderPassInfo.subpassCount = 1;
 	renderPassInfo.pSubpasses = &subpass;
 
-	renderPassInfo.pDependencies = nullptr;
-	renderPassInfo.dependencyCount = 0;
+	VkSubpassDependency subpassDep{};
+	subpassDep.srcSubpass = subpassDep.dstSubpass = 0;
+	subpassDep.srcStageMask = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+	subpassDep.dstStageMask = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+	subpassDep.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+	subpassDep.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+	renderPassInfo.pDependencies = &subpassDep;
+	renderPassInfo.dependencyCount = 1;
 	// before Cemu 1.25.5 we used zero here, which means implicit synchronization. For 1.25.5 it was changed to 2 (using the subpass dependencies above)
 	// Reverted this again to zero for Cemu 1.25.5b as the performance cost is just too high. Manual synchronization is preferred
 
