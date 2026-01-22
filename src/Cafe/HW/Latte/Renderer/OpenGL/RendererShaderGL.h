@@ -25,6 +25,8 @@ public:
 	void SetUniform2fv(sint32 location, void* data, sint32 count);
 	void SetUniform4iv(sint32 location, void* data, sint32 count);
 
+	void SetDecompilerShader(class LatteDecompilerShader* decompilerShader);
+
 	static void ShaderCacheLoading_begin(uint64 cacheTitleId);
 	static void ShaderCacheLoading_end();
     static void ShaderCacheLoading_Close();
@@ -32,6 +34,7 @@ public:
 private:
 	GLuint m_program;
 	GLuint m_shader_object;
+	LatteDecompilerShader* m_decompilerShader = nullptr;
 
 	bool loadBinary();
 	void storeBinary();
@@ -40,6 +43,7 @@ private:
 
 	bool m_shader_attached{ false };
 	bool m_isCompiled{ false };
+	bool m_binaryLoaded { false };
 
 	static std::unique_ptr<class FileCache> s_programBinaryCache;
 };
