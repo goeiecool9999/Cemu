@@ -9,12 +9,25 @@
 #define GX2_DISABLE	0
 
 #include "GX2_Surface.h"
+#include <boost/container/static_vector.hpp>
 
 // general
 
+class FileStream;
 namespace GX2
 {
 	COSModule* GetModule();
+	extern enum class ReplayState
+	{
+		NONE,
+		CAP_REQUESTED,
+		CAPTURING,
+		REPLAYING
+	} replayState;
+	extern FileStream* dumpFile;
+	constexpr size_t indirectBufferDumpSize = 64 * (1 << 20) / 4; // reserve 64 MiB
+	extern boost::container::static_vector<uint32, indirectBufferDumpSize> indirectBufferDump;
+	extern std::mutex dumpFileMutex;
 }
 
 // shader

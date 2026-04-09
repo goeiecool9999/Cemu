@@ -227,6 +227,14 @@ namespace GX2
 		cmd[1] = memory_virtualToPhysical(MEMPTR<void>(buffer).GetMPTR());
 		cmd[2] = 0x00000000; // address high bits
 		cmd[3] = sizeInU32s;
+		if (GX2::replayState == GX2::ReplayState::CAPTURING)
+		{
+			std::scoped_lock{GX2::dumpFileMutex};
+			// write the offset into buffer dump vector instead
+			cmd[1] = GX2::indirectBufferDump.size();
+			cmd[2] = 1;
+			std::copy_n((uint32*)buffer, sizeInU32s, std::back_insert_iterator{GX2::indirectBufferDump});
+		}
 		if (completionGPUReadPointer)
 		{
 			// append command to update completionGPUReadPointer after the GPU is done with the command buffer
@@ -424,10 +432,24 @@ namespace GX2
 		cemu_assert_debug((size&3) == 0);
 		// write PM4 command
 		GX2ReserveCmdSpace(4);
-		gx2WriteGather_submit(pm4HeaderType3(IT_INDIRECT_BUFFER_PRIV, 3),
-			memory_virtualToPhysical(addr),
-			0, // high address bits
-			size / 4);
+		if (GX2::replayState != GX2::ReplayState::CAPTURING)
+		{
+			gx2WriteGather_submit(pm4HeaderType3(IT_INDIRECT_BUFFER_PRIV, 3),
+				memory_virtualToPhysical(addr),
+				0, // high address bits
+				size / 4);
+		}
+		else
+		{
+			std::scoped_lock lock(GX2::dumpFileMutex);
+			uint32 oldSize = GX2::indirectBufferDump.size();
+			std::copy_n(MEMPTR<uint32>{addr}.GetPtr(), size / 4, std::back_insert_iterator{GX2::indirectBufferDump});
+			// write the offset into buffer dump vector
+			gx2WriteGather_submit(pm4HeaderType3(IT_INDIRECT_BUFFER_PRIV, 3),
+				oldSize,
+				1, // high address bits
+				size / 4);
+		}
 	}
 
 	void GX2DirectCallDisplayList(void* addr, uint32 size)

@@ -402,7 +402,7 @@ void memory_writeDumpFile(uint32 startAddr, uint32 size, const fs::path& path)
 void memory_createDump()
 {
 	const uint32 pageSize = MemMapper::GetPageSize();
-	fs::path path = ActiveSettings::GetUserDataPath("dump/ramDump{:}", (uint32)time(nullptr));
+	fs::path path = ActiveSettings::GetUserDataPath("dump/replay/mem");
 	fs::create_directories(path);
 
 	for (auto& itr : g_mmuRanges)
@@ -410,6 +410,26 @@ void memory_createDump()
 		if(!itr->isMapped())
 			continue;
 		memory_writeDumpFile(itr->getBase(), itr->getSize(), path);
+	}
+}
+
+void memory_restoreDump(const fs::path& dumpDir)
+{
+	fs::directory_iterator iterateRanges{dumpDir};
+	for (const auto& i : iterateRanges)
+	{
+		std::string filename = i.path().filename();
+		uint32 address;
+		uint32 size = i.file_size();
+		std::sscanf(filename.c_str(), "%8x.bin", &address);
+		FileStream* fs = FileStream::openFile2(i.path(), false);
+
+		auto range = memory_getMMURangeByAddress(address);
+		if (!range)
+			continue;
+		if (!range->isMapped())
+			range->mapMem();
+		fs->readData(memory_getPointerFromPhysicalOffset(address), i.file_size());
 	}
 }
 

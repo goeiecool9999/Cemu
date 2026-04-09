@@ -20,6 +20,7 @@
 #include "GX2_Surface.h"
 #include "GX2_Surface_Copy.h"
 #include "GX2_Texture.h"
+#include "config/ActiveSettings.h"
 
 #include <cinttypes>
 
@@ -45,6 +46,16 @@ struct
 };
 
 uint64 lastSwapTime = 0;
+namespace GX2
+{
+	ReplayState replayState = GX2::ReplayState::NONE;
+	FileStream* dumpFile = nullptr;
+	boost::container::static_vector<uint32, indirectBufferDumpSize> indirectBufferDump{};
+	FileStream* indirectBufferDumpFile = nullptr;
+	std::mutex dumpFileMutex{};
+}
+
+extern std::unordered_set<LatteTexture*> g_allTextures;
 
 void gx2Export_GX2SwapScanBuffers(PPCInterpreter_t* hCPU)
 {
@@ -78,6 +89,36 @@ void gx2Export_GX2SwapScanBuffers(PPCInterpreter_t* hCPU)
 	// swap frames
 	gx2WriteGather_submitU32AsBE(pm4HeaderType3(IT_HLE_TRIGGER_SCANBUFFER_SWAP, 1));
 	gx2WriteGather_submitU32AsBE(0); // reserved
+
+	if (GX2::replayState == GX2::ReplayState::CAPTURING)
+	{
+		GX2::GX2DrawDone();
+		GX2::replayState = GX2::ReplayState::NONE;
+
+		delete GX2::dumpFile;
+		GX2::dumpFile = nullptr;
+
+		GX2::indirectBufferDumpFile->writeData(GX2::indirectBufferDump.data(), GX2::indirectBufferDump.size() * sizeof(GX2::indirectBufferDump[0]));
+		GX2::indirectBufferDump.clear();
+		delete GX2::indirectBufferDumpFile;
+		GX2::indirectBufferDumpFile = nullptr;
+	}
+
+	if (GX2::replayState == GX2::ReplayState::CAP_REQUESTED)
+	{
+		// make sure command processor is idle
+		GX2::GX2DrawDone();
+
+		memory_createDump();
+		fs::create_directories(ActiveSettings::GetUserDataPath("dump/replay"));
+
+		GX2::dumpFile = FileStream::createFile2(ActiveSettings::GetUserDataPath("dump/replay/gx2.bin"));
+		// save context registers
+		GX2::dumpFile->writeData(LatteGPUState.contextRegister, sizeof(LatteGPUState.contextRegister));
+
+		GX2::indirectBufferDumpFile = FileStream::createFile2(ActiveSettings::GetUserDataPath("dump/replay/indirect.bin"));
+		GX2::replayState = GX2::ReplayState::CAPTURING;
+	}
 
 	// wait for flip if the CPU is too far ahead
 	// doing it after swap request is how the actual console does it, but that still causes issues in Pokken

@@ -212,6 +212,7 @@ uint16 memory_readU16(uint32 address);
 uint8 memory_readU8(uint32 address);
 
 void memory_createDump();
+void memory_restoreDump(const fs::path& dir);
 
 template<size_t count>
 void memory_readBytes(VAddr address, std::array<uint8, count>& buffer)

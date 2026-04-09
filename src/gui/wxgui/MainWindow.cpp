@@ -11,6 +11,8 @@
 #include "wxgui/windows/TextureRelationViewer/TextureRelationWindow.h"
 #include "wxgui/windows/PPCThreadsViewer/DebugPPCThreadsWindow.h"
 #include "AudioDebuggerWindow.h"
+#include "Cafe/OS/libs/TCL/TCL.h"
+#include "Cafe/OS/libs/gx2/GX2.h"
 #include "wxgui/canvas/OpenGLCanvas.h"
 #include "wxgui/canvas/VulkanCanvas.h"
 #if ENABLE_METAL
@@ -653,7 +655,54 @@ bool MainWindow::FileLoad(const fs::path launchPath, wxLaunchGameEvent::INITIATE
 #endif
 
 	CreateCanvas();
-	CafeSystem::LaunchForegroundTitle();
+	if (getenv("CEMU_REPLAY_MODE"))
+	{
+		GX2::replayState = GX2::ReplayState::REPLAYING;
+		// restore memory
+		memory_restoreDump("dump/replay/mem");
+		FileStream* gx2 = FileStream::openFile("dump/replay/gx2.bin");
+		FileStream* indirectDump = FileStream::openFile("dump/replay/indirect.bin");
+		if (!gx2 || !indirectDump)
+			throw std::runtime_error("failed to open replay");
+
+
+		// restore beginning of frame context registers
+		gx2->readData(LatteGPUState.contextRegister, sizeof(LatteGPUState.contextRegister));
+
+		size_t indirectSize = indirectDump->GetSize();
+		GX2::indirectBufferDump.resize(indirectSize / sizeof(uint32));
+		indirectDump->readData(GX2::indirectBufferDump.data(), indirectSize);
+
+		GraphicPack2::ActivateForCurrentTitle();
+		CafeSystem::sSystemRunning = true;
+		Latte_Start();
+
+		std::thread replayThread{[&](){
+			std::vector<uint32> data;
+			LatteGPUState.gx2InitCalled++;
+			while (true)
+			{
+				uint32 size;
+				if (!gx2->readU32(size))
+					break;
+
+				data.resize(size);
+				gx2->readData(data.data(), size * sizeof(uint32));
+
+				betype<TCL::TCLSubmissionFlag> noFlags{};
+				noFlags |= TCL::TCLSubmissionFlag::USE_RETIRED_MARKER;
+				uint64be timestampOut;
+				TCL::TCLSubmitToRing((uint32be*)data.data(), size, &noFlags, &timestampOut);
+			}
+
+		}};
+		replayThread.detach();
+
+	}
+	else
+	{
+		CafeSystem::LaunchForegroundTitle();
+	}
 	RecreateMenu();
 	UpdateChildWindowTitleRunningState();
 
@@ -1076,7 +1125,7 @@ void MainWindow::OnDebugSetting(wxCommandEvent& event)
 	else if (event.GetId() == MAINFRAME_MENU_ID_DEBUG_AUDIO_AUX_ONLY)
 		ActiveSettings::EnableAudioOnlyAux(event.IsChecked());
 	else if (event.GetId() == MAINFRAME_MENU_ID_DEBUG_DUMP_RAM)
-		memory_createDump();
+		GX2::replayState = GX2::ReplayState::CAP_REQUESTED;
 	else if (event.GetId() == MAINFRAME_MENU_ID_DEBUG_DUMP_FST)
 	{
 		/*	int msgBoxAnswer = wxMessageBox(_("All files from the currently running game will be dumped to /dump/<gamefolder>. This process can take a few minutes."),
@@ -1494,6 +1543,9 @@ void MainWindow::OnKeyUp(wxKeyEvent& event)
 
 	if (swkbd_hasKeyboardInputHook())
 		return;
+
+	if (event.GetKeyCode() == 'P')
+		GX2::replayState = GX2::ReplayState::CAP_REQUESTED;
 
 	HotkeySettings::CaptureInput(event);
 }

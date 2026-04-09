@@ -1,7 +1,9 @@
 #include "Cafe/OS/common/OSCommon.h"
 #include "Cafe/OS/libs/TCL/TCL.h"
 
+#include "Common/unix/FileStream_unix.h"
 #include "HW/Latte/Core/LattePM4.h"
+#include "OS/libs/gx2/GX2.h"
 
 namespace TCL
 {
@@ -98,6 +100,13 @@ namespace TCL
 	// this function assumes that TCLWaitForRBSpace was called and that there is enough space
 	void TCLWriteCmd(uint32be* cmd, uint32 cmdLen)
 	{
+		if (GX2::replayState == GX2::ReplayState::CAPTURING)
+		{
+			std::scoped_lock{GX2::dumpFileMutex};
+			GX2::dumpFile->writeU32(cmdLen);
+			GX2::dumpFile->writeData(cmd, cmdLen * sizeof(uint32));
+		}
+
 		uint32 writeIndex = tclRingBufferA_writeIndex.load(std::memory_order::relaxed);
 
 		while (cmdLen > 0)

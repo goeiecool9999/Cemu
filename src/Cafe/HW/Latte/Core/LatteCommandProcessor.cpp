@@ -217,6 +217,10 @@ void LatteCP_itIndirectBufferDepr(LatteCMDPtr cmd, uint32 nWords)
 	{
 		DrawPassContext drawPassCtx;
 		uint32be* buf = MEMPTR<uint32be>(physicalAddress).GetPtr();
+		if (physicalAddressHigh)
+		{
+			buf = (uint32be*)&GX2::indirectBufferDump[physicalAddress];
+		}
 		drawPassCtx.PushCurrentCommandQueuePos(buf, buf, buf + sizeInU32s);
 
 		LatteCP_processCommandBuffer(drawPassCtx);
@@ -236,6 +240,10 @@ void LatteCP_itIndirectBuffer(LatteCMDPtr cmd, uint32 nWords, DrawPassContext& d
 	{
 		uint32 displayListSize = sizeInDWords * 4;
 		uint32be* buf = MEMPTR<uint32be>(physicalAddress).GetPtr();
+		if (physicalAddressHigh)
+		{
+			buf = (uint32be*)&GX2::indirectBufferDump[physicalAddress];
+		}
 		drawPassCtx.PushCurrentCommandQueuePos(buf, buf, buf + sizeInDWords);
 	}
 }
@@ -417,6 +425,9 @@ LatteCMDPtr LatteCP_itWaitRegMem(LatteCMDPtr cmd, uint32 nWords)
 	const uint32 GPU7_WAIT_MEM_OP_NEVER = 7;
 
 	LatteCP_signalEnterWait();
+
+	if (GX2::replayState == GX2::ReplayState::REPLAYING)
+		return cmd;
 
 	bool stalls = false;
 	if ((word0 & 0x10) != 0)

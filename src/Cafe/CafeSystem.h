@@ -20,6 +20,7 @@ namespace CafeSystem
 		INVALID_RPX,
 		UNABLE_TO_MOUNT, // failed to mount through TitleInfo (most likely caused by an invalid or outdated path)
 	};
+	extern bool sSystemRunning;
 
 	void Initialize();
 	void SetImplementation(SystemImplementation* impl);
