@@ -3,6 +3,7 @@
 
 #include "config/CemuConfig.h"
 #include "Cafe/HW/Latte/Core/LatteOverlay.h"
+#include "Cafe/HW/Latte/Core/LatteCachedFBO.h"
 
 #include <imgui.h>
 #include "imgui/imgui_extension.h"
@@ -82,6 +83,43 @@ bool Renderer::ImguiBegin(bool mainWindow)
 	io.DisplaySize = {window_size.x, window_size.y}; // should be only updated in the renderer and only when needed
 
 	ImGui_PrecacheFonts();
+	return true;
+}
+
+void Renderer::rendertarget_deleteCachedFBO(LatteCachedFBO* cfbo)
+{
+	if (cfbo == m_activeFBO)
+		m_activeFBO = nullptr;
+}
+
+void Renderer::rendertarget_bindFramebufferObject(LatteCachedFBO* cfbo)
+{
+	m_activeFBO = cfbo;
+}
+
+// make a guess if a pipeline is not essential
+// non-essential means that skipping these drawcalls shouldn't lead to permanently corrupted graphics
+bool Renderer::IsAsyncPipelineAllowed(uint32 numIndices, bool isTracingToolEnabled)
+{
+	// frame debuggers dont handle async well (as of 2020)
+	if (isTracingToolEnabled)
+		return false;
+
+	LatteCachedFBO* currentFBO = m_activeFBO;
+	auto fboExtend = currentFBO->m_size;
+
+	if (fboExtend.x == 1600 && fboExtend.y == 1600)
+		return false; // Splatoon ink mechanics use 1600x1600 R8 and R8G8 framebuffers, this resolution is rare enough that we can just blacklist it globally
+
+	if (currentFBO->hasDepthBuffer())
+		return true; // aggressive filter but seems to work well so far
+
+	// small index count (3,4,5,6) is often associated with full-viewport quads (which are considered essential due to often being used to generate persistent textures)
+	if (numIndices <= 6)
+	{
+		return false;
+	}
+
 	return true;
 }
 

@@ -39,8 +39,7 @@ bool RendererShaderGL::loadBinary()
 	glGetProgramiv(m_program, GL_LINK_STATUS, &status);
 	if (status != GL_TRUE)
 	{
-		glDeleteProgram(m_program);
-		m_program = 0;
+		CleanupProgramObj();
 		return false;
 	}
 	m_binaryLoaded = true;
@@ -132,20 +131,28 @@ RendererShaderGL::RendererShaderGL(ShaderType type, uint64 baseHash, uint64 auxH
 RendererShaderGL::~RendererShaderGL()
 {
 	CleanupShaderObj();
-
-	if (m_program != 0)
-		glDeleteProgram(m_program);
+	CleanupProgramObj();
 }
 
 void RendererShaderGL::CleanupShaderObj()
 {
-	if (m_shader_object != 0 && m_shader_attached)
+	if (m_shader_object == 0)
+		return;
+
+	if (m_shader_attached)
 		glDetachShader(m_program, m_shader_object);
 
-	if (m_shader_object != 0)
-		glDeleteShader(m_shader_object);
-
+	glDeleteShader(m_shader_object);
 	m_shader_object = 0;
+}
+
+void RendererShaderGL::CleanupProgramObj()
+{
+	if (m_program == 0)
+		return;
+
+	glDeleteProgram(m_program);
+	m_program = 0;
 }
 
 void RendererShaderGL::PreponeCompilation()
@@ -210,8 +217,7 @@ bool RendererShaderGL::WaitForCompiled()
 		}
 		m_isCompiled = true;
 		CleanupShaderObj();
-		if (m_program != 0)
-			glDeleteProgram(m_program);
+		CleanupProgramObj();
 		return false;
 	}
 
@@ -229,6 +235,7 @@ bool RendererShaderGL::WaitForCompiled()
 		}
 		m_isCompiled = true;
 		CleanupShaderObj();
+		CleanupProgramObj();
 		return false;
 	}
 

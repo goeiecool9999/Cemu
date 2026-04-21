@@ -892,7 +892,7 @@ RendererShaderGL* rectsEmulationGS_getShaderGL(LatteDecompilerShader* vertexShad
 uint32 sPrevTextureReadbackDrawcallUpdate = 0;
 
 template<bool TIsMinimal, bool THasProfiling>
-void OpenGLRenderer::draw_genericDrawHandler(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType)
+bool OpenGLRenderer::draw_genericDrawHandler(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType)
 {
 	ReleaseBufferCacheEntries();
 
@@ -904,7 +904,7 @@ void OpenGLRenderer::draw_genericDrawHandler(uint32 baseVertex, uint32 baseInsta
 	{
 		LatteDraw_handleSpecialState8_clearAsDepth();
 		LatteGPUState.drawCallCounter++;
-		return;
+		return true;
 	}
 
 	// update shaders and uniforms
@@ -912,38 +912,12 @@ void OpenGLRenderer::draw_genericDrawHandler(uint32 baseVertex, uint32 baseInsta
 	{
 		beginPerfMonProfiling(performanceMonitor.gpuTime_dcStageShaderAndUniformMgr);
 		LatteSHRC_UpdateActiveShaders();
-		LatteDecompilerShader* vs = LatteSHRC_GetActiveVertexShader();
-		LatteDecompilerShader* gs = LatteSHRC_GetActiveGeometryShader();
-		LatteDecompilerShader* ps = LatteSHRC_GetActivePixelShader();
-
-		for (auto& i : {vs, gs, ps})
-		{
-			if (!i)
-				continue;
-			if (!i->shader->IsCompiled())
-			{
-				i->shader->WaitForCompiled();
-			}
-		}
-
-		if (vs)
-			shader_bind(vs->shader);
-		else
-			shader_unbind(RendererShader::ShaderType::kVertex);
-		if (ps && LatteGPUState.contextRegister[mmVGT_STRMOUT_EN] == 0)
-			shader_bind(ps->shader);
-		else
-			shader_unbind(RendererShader::ShaderType::kFragment);
-		if (gs)
-			shader_bind(gs->shader);
-		else
-			shader_unbind(RendererShader::ShaderType::kGeometry);
 		endPerfMonProfiling(performanceMonitor.gpuTime_dcStageShaderAndUniformMgr);
 	}
 	if (LatteGPUState.activeShaderHasError)
 	{
 		debug_printf("Skipped drawcall due to shader error\n");
-		return;
+		return false;
 	}
 	// check for blacklisted shaders
 	uint64 vsShaderHash = 0;
@@ -964,7 +938,7 @@ void OpenGLRenderer::draw_genericDrawHandler(uint32 baseVertex, uint32 baseInsta
 		if (glBeginTransformFeedback == nullptr)
 		{
 			cemu_assert_debug(false);
-			return; // transform feedback not supported
+			return false; // transform feedback not supported
 		}
 	}
 	// skip draw if output is not used
@@ -972,7 +946,7 @@ void OpenGLRenderer::draw_genericDrawHandler(uint32 baseVertex, uint32 baseInsta
 	{
 		// rasterizer and streamout disabled
 		LatteGPUState.drawCallCounter++;
-		return;
+		return true;
 	}
 	// get primitive
 	if (primitiveMode == Latte::LATTE_VGT_PRIMITIVE_TYPE::E_PRIMITIVE_TYPE::TRIANGLES)
@@ -999,7 +973,7 @@ void OpenGLRenderer::draw_genericDrawHandler(uint32 baseVertex, uint32 baseInsta
 	{
 		cemu_assert_debug(false); // unsupported primitive type
 		LatteGPUState.drawCallCounter++;
-		return;
+		return true;
 	}
 
 	if constexpr (!TIsMinimal)
@@ -1014,9 +988,9 @@ void OpenGLRenderer::draw_genericDrawHandler(uint32 baseVertex, uint32 baseInsta
 			{
 				// only handle rendertargets if streamout is inactive
 				if (LatteMRT::UpdateCurrentFBO() == false)
-					return; // no render target
+					return false; // no render target
 				if (hasValidFramebufferAttached == false)
-					return;
+					return false;
 			}
 			LatteTexture_updateTextures(); // caution: Do not call any functions that potentially modify texture bindings after this line
 			if (LatteGPUState.repeatTextureInitialization == false)
@@ -1028,6 +1002,46 @@ void OpenGLRenderer::draw_genericDrawHandler(uint32 baseVertex, uint32 baseInsta
 		beginPerfMonProfiling(performanceMonitor.gpuTime_dcStageMRT);
 		LatteMRT::ApplyCurrentState();
 		endPerfMonProfiling(performanceMonitor.gpuTime_dcStageMRT);
+
+		beginPerfMonProfiling(performanceMonitor.gpuTime_dcStageShaderAndUniformMgr);
+
+		LatteDecompilerShader* vs = LatteSHRC_GetActiveVertexShader();
+		LatteDecompilerShader* gs = LatteSHRC_GetActiveGeometryShader();
+		LatteDecompilerShader* ps = LatteSHRC_GetActivePixelShader();
+
+		const bool isAsyncAllowed = IsAsyncPipelineAllowed(count, false);
+
+		for (auto& i : {vs, gs, ps})
+		{
+			if (!i)
+				continue;
+			if (!i->shader->IsCompiled())
+			{
+				if (isAsyncAllowed)
+				{
+					return false;
+				}
+				else
+				{
+					i->shader->WaitForCompiled();
+				}
+			}
+		}
+
+		if (vs)
+			shader_bind(vs->shader);
+		else
+			shader_unbind(RendererShader::ShaderType::kVertex);
+		if (ps && LatteGPUState.contextRegister[mmVGT_STRMOUT_EN] == 0)
+			shader_bind(ps->shader);
+		else
+			shader_unbind(RendererShader::ShaderType::kFragment);
+		if (gs)
+			shader_bind(gs->shader);
+		else
+			shader_unbind(RendererShader::ShaderType::kGeometry);
+
+		endPerfMonProfiling(performanceMonitor.gpuTime_dcStageShaderAndUniformMgr);
 
 		// texture barrier for write-read patterns
 		if (LatteGPUState.requiresTextureBarrier && glTextureBarrier)
@@ -1069,11 +1083,11 @@ void OpenGLRenderer::draw_genericDrawHandler(uint32 baseVertex, uint32 baseInsta
 		if (!rt_depth || !rt_color)
 		{
 			cemuLog_log(LogType::Force, "GPU7 special state 5 used but render target not setup correctly");
-			return;
+			return false;
 		}
 		surfaceCopy_copySurfaceWithFormatConversion(rt_depth->baseTexture, rt_depth->firstMip, rt_depth->firstSlice, rt_color->baseTexture, rt_color->firstMip, rt_color->firstSlice, rt_depth->baseTexture->width, rt_depth->baseTexture->height);
 		LatteGPUState.drawCallCounter++;
-		return;
+		return true;
 	}
 
 	beginPerfMonProfiling(performanceMonitor.gpuTime_dcStageShaderAndUniformMgr);
@@ -1205,9 +1219,9 @@ void OpenGLRenderer::draw_genericDrawHandler(uint32 baseVertex, uint32 baseInsta
 		// streamout and rasterizer enabled, repeat drawcall with streamout disabled
 		uint32 strmOutEnOrg = LatteGPUState.contextRegister[mmVGT_STRMOUT_EN];
 		LatteGPUState.contextRegister[mmVGT_STRMOUT_EN] = 0;
-		draw_genericDrawHandler<false, THasProfiling>(baseVertex, baseInstance, instanceCount, count, indexDataMPTR, indexType);
+		bool drawRes = draw_genericDrawHandler<false, THasProfiling>(baseVertex, baseInstance, instanceCount, count, indexDataMPTR, indexType);
 		LatteGPUState.contextRegister[mmVGT_STRMOUT_EN] = strmOutEnOrg;
-		return;
+		return drawRes;
 	}
 	LatteTextureReadback_Update();
 	uint32 dcSinceLastReadbackCheck = LatteGPUState.drawCallCounter - sPrevTextureReadbackDrawcallUpdate;
@@ -1217,6 +1231,7 @@ void OpenGLRenderer::draw_genericDrawHandler(uint32 baseVertex, uint32 baseInsta
 		sPrevTextureReadbackDrawcallUpdate = LatteGPUState.drawCallCounter;
 	}	
 	catchOpenGLError();
+	return true;
 }
 
 void OpenGLRenderer::draw_beginSequence()
@@ -1224,13 +1239,13 @@ void OpenGLRenderer::draw_beginSequence()
 	// no-op
 }
 
-void OpenGLRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, bool isFirst)
+bool OpenGLRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, bool isFirst)
 {
 	bool isMinimal = !isFirst;
     if (isMinimal)
-        draw_genericDrawHandler<true, false>(baseVertex, baseInstance, instanceCount, count, indexDataMPTR, indexType);
+        return draw_genericDrawHandler<true, false>(baseVertex, baseInstance, instanceCount, count, indexDataMPTR, indexType);
     else
-        draw_genericDrawHandler<false, false>(baseVertex, baseInstance, instanceCount, count, indexDataMPTR, indexType);
+        return draw_genericDrawHandler<false, false>(baseVertex, baseInstance, instanceCount, count, indexDataMPTR, indexType);
 }
 
 void OpenGLRenderer::draw_endSequence()

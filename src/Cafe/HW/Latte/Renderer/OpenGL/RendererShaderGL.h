@@ -11,6 +11,7 @@ public:
 	virtual ~RendererShaderGL();
 
 	void CleanupShaderObj();
+	void CleanupProgramObj();
 	void PreponeCompilation() override;
 	bool IsCompiled() override;
 	bool WaitForCompiled() override;

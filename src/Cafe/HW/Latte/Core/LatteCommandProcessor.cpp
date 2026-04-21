@@ -64,22 +64,24 @@ public:
 		uint32 baseInstance = LatteGPUState.contextRegister[mmSQ_VTX_START_INST_LOC];
 		uint32 numInstances = LatteGPUState.contextNew.VGT_DMA_NUM_INSTANCES.get_NUM_INSTANCES();
 
+		bool executeSuccess = false;
 		if (!isAutoIndex)
 		{
 			cemu_assert_debug(physIndices != MPTR_NULL);
 			if (physIndices == MPTR_NULL)
 				return;
 			auto indexType = LatteGPUState.contextNew.VGT_DMA_INDEX_TYPE.get_INDEX_TYPE();
-			g_renderer->draw_execute(baseVertex, baseInstance, numInstances, count, physIndices, indexType, m_isFirstDraw);
+			executeSuccess = g_renderer->draw_execute(baseVertex, baseInstance, numInstances, count, physIndices, indexType, m_isFirstDraw);
 		}
 		else
 		{
-			g_renderer->draw_execute(baseVertex, baseInstance, numInstances, count, MPTR_NULL, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE::AUTO, m_isFirstDraw);
+			executeSuccess = g_renderer->draw_execute(baseVertex, baseInstance, numInstances, count, MPTR_NULL, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE::AUTO, m_isFirstDraw);
 		}
 		performanceMonitor.cycle[performanceMonitor.cycleIndex].drawCallCounter++;
 		if (!m_isFirstDraw)
 			performanceMonitor.cycle[performanceMonitor.cycleIndex].fastDrawCallCounter++;
-		m_isFirstDraw = false;
+		if (executeSuccess)
+			m_isFirstDraw = false;
 		m_vertexBufferChanged = false;
 		m_uniformBufferChanged = false;
 	}

@@ -151,7 +151,7 @@ PipelineInfo* VulkanRenderer::draw_getCachedPipeline()
 
 	const auto geometryShader = LatteSHRC_GetActiveGeometryShader();
 	const auto pixelShader = LatteSHRC_GetActivePixelShader();
-	auto cachedFboVk = (CachedFBOVk*)m_state.activeFBO;
+	auto cachedFboVk = (CachedFBOVk*)m_activeFBO;
 
 	const uint64 stateHash = draw_calculateGraphicsPipelineHash(fetchShader, vertexShader, geometryShader, pixelShader, cachedFboVk->GetRenderPassObj(), LatteGPUState.contextNew);
 
@@ -183,32 +183,6 @@ void VulkanRenderer::unregisterGraphicsPipeline(PipelineInfo* pipelineInfo)
 	}
 }
 
-// make a guess if a pipeline is not essential
-// non-essential means that skipping these drawcalls shouldn't lead to permanently corrupted graphics
-bool VulkanRenderer::IsAsyncPipelineAllowed(uint32 numIndices)
-{
-	// frame debuggers dont handle async well (as of 2020)
-	if (IsTracingToolEnabled())
-		return false;
-
-	CachedFBOVk* currentFBO = m_state.activeFBO;
-	auto fboExtend = currentFBO->GetExtend();
-
-	if (fboExtend.width == 1600 && fboExtend.height == 1600)
-		return false; // Splatoon ink mechanics use 1600x1600 R8 and R8G8 framebuffers, this resolution is rare enough that we can just blacklist it globally
-
-	if (currentFBO->hasDepthBuffer())
-		return true; // aggressive filter but seems to work well so far
-
-	// small index count (3,4,5,6) is often associated with full-viewport quads (which are considered essential due to often being used to generate persistent textures)
-	if (numIndices <= 6)
-	{
-
-		return false;
-	}
-
-	return true;
-}
 
 // create graphics pipeline for current state
 PipelineInfo* VulkanRenderer::draw_createGraphicsPipeline(uint32 indexCount)
@@ -217,13 +191,12 @@ PipelineInfo* VulkanRenderer::draw_createGraphicsPipeline(uint32 indexCount)
 	const auto vertexShader = LatteSHRC_GetActiveVertexShader();
 	const auto geometryShader = LatteSHRC_GetActiveGeometryShader();
 	const auto pixelShader = LatteSHRC_GetActivePixelShader();
-	auto cachedFboVk = (CachedFBOVk*)m_state.activeFBO;
+	auto vkFBO = (CachedFBOVk*)m_activeFBO;
 
 	uint64 minimalStateHash = draw_calculateMinimalGraphicsPipelineHash(fetchShader, LatteGPUState.contextNew);
-	uint64 pipelineHash = draw_calculateGraphicsPipelineHash(fetchShader, vertexShader, geometryShader, pixelShader, cachedFboVk->GetRenderPassObj(), LatteGPUState.contextNew);
+	uint64 pipelineHash = draw_calculateGraphicsPipelineHash(fetchShader, vertexShader, geometryShader, pixelShader, vkFBO->GetRenderPassObj(), LatteGPUState.contextNew);
 
 	// create PipelineInfo
-	auto vkFBO = (CachedFBOVk*)(VulkanRenderer::GetInstance()->m_state.activeFBO);
 	PipelineInfo* pipelineInfo = new PipelineInfo(minimalStateHash, pipelineHash, fetchShader, vertexShader, pixelShader, geometryShader);
 
 	// register pipeline
@@ -242,7 +215,7 @@ PipelineInfo* VulkanRenderer::draw_createGraphicsPipeline(uint32 indexCount)
 	// use heuristics based on parameter patterns to determine if the current drawcall is essential (non-skipable)
 	bool allowAsyncCompile = false;
 	if (GetConfig().async_compile)
-		allowAsyncCompile = IsAsyncPipelineAllowed(indexCount);
+		allowAsyncCompile = IsAsyncPipelineAllowed(indexCount, IsTracingToolEnabled());
 
 	if (allowAsyncCompile)
 	{
@@ -1153,7 +1126,7 @@ bool s_syncOnNextDraw = false;
 
 void VulkanRenderer::draw_setRenderPass()
 {
-	CachedFBOVk* fboVk = m_state.activeFBO;
+	CachedFBOVk* fboVk = (CachedFBOVk*)m_activeFBO;
 
 	// update self-dependency flag
 	if (m_state.descriptorSetsChanged || m_state.activeRenderpassFBO != fboVk)
@@ -1299,12 +1272,12 @@ void VulkanRenderer::draw_beginSequence()
 		m_state.drawSequenceSkip = true;
 }
 
-void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, bool isFirst)
+bool VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, bool isFirst)
 {
 	if (m_state.drawSequenceSkip)
 	{
 		LatteGPUState.drawCallCounter++;
-		return;
+		return true;
 	}
 
 	// fast clear color as depth
@@ -1312,13 +1285,13 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 	{
 		LatteDraw_handleSpecialState8_clearAsDepth();
 		LatteGPUState.drawCallCounter++;
-		return;
+		return true;
 	}
 	else if (LatteGPUState.contextNew.GetSpecialStateValues()[5] != 0)
 	{
 		draw_handleSpecialState5();
 		LatteGPUState.drawCallCounter++;
-		return;
+		return true;
 	}
 
 	// prepare streamout
@@ -1426,7 +1399,7 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 	{
 		// invalid/uninitialized pipeline
 		m_state.activeVertexDS = nullptr;
-		return;
+		return false;
 	}
 
 
@@ -1525,6 +1498,7 @@ void VulkanRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32
 	LatteStreamout_FinishDrawcall(m_useHostMemoryForCache);
 
 	LatteGPUState.drawCallCounter++;
+	return true;
 }
 
 // used in place of vertex/uniform caching when direct memory access is possible

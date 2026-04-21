@@ -276,8 +276,6 @@ public:
 	void renderTarget_setScissor(sint32 scissorX, sint32 scissorY, sint32 scissorWidth, sint32 scissorHeight) override;
 
 	LatteCachedFBO* rendertarget_createCachedFBO(uint64 key) override;
-	void rendertarget_deleteCachedFBO(LatteCachedFBO* cfbo) override;
-	void rendertarget_bindFramebufferObject(LatteCachedFBO* cfbo) override;
 
 	// texture functions
 	void* texture_acquireTextureUploadBuffer(uint32 size) override;
@@ -349,9 +347,6 @@ private:
 
 		// textures
 		LatteTextureViewVk* boundTexture[128]{};
-
-		// rendertarget
-		CachedFBOVk* activeFBO{}; // the FBO active for the emulated GPU
 
 		// command buffer
 		VkCommandBuffer currentCommandBuffer{};
@@ -509,8 +504,6 @@ private:
 
 	// shader
 
-	bool IsAsyncPipelineAllowed(uint32 numIndices);
-
 	uint64 GetDescriptorSetStateHash(LatteDecompilerShader* shader);
 
 	// imgui
@@ -534,7 +527,7 @@ private:
 	void draw_endRenderPass();
 
 	void draw_beginSequence() override;
-	void draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, bool isFirst) override;
+	bool draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, bool isFirst) override;
 	void draw_endSequence() override;
 
 	void draw_updateVertexBuffersDirectAccess();

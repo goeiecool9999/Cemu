@@ -711,6 +711,7 @@ LatteCachedFBO* OpenGLRenderer::rendertarget_createCachedFBO(uint64 key)
 
 void OpenGLRenderer::rendertarget_deleteCachedFBO(LatteCachedFBO* cfbo)
 {
+	Renderer::rendertarget_deleteCachedFBO(cfbo);
 	auto cfboGL = (CachedFBOGL*)cfbo;
 	if (prevBoundFBO == cfboGL->glId_fbo)
 	{
@@ -723,6 +724,7 @@ void OpenGLRenderer::rendertarget_deleteCachedFBO(LatteCachedFBO* cfbo)
 // set active FBO
 void OpenGLRenderer::rendertarget_bindFramebufferObject(LatteCachedFBO* cfbo)
 {
+	Renderer::rendertarget_bindFramebufferObject(cfbo);
 	GLuint fboid;
 	if (cfbo)
 	{

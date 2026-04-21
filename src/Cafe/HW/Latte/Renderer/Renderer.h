@@ -84,6 +84,7 @@ public:
 	// imgui
 	virtual bool ImguiBegin(bool mainWindow);
 	virtual void ImguiEnd() = 0;
+	bool IsAsyncPipelineAllowed(uint32 numIndices, bool isTracingToolEnabled);
 	virtual ImTextureID GenerateTexture(const std::vector<uint8>& data, const Vector2i& size) = 0;
 	virtual void DeleteTexture(ImTextureID id) = 0;
 	virtual void DeleteFontTextures() = 0;
@@ -97,8 +98,10 @@ public:
 	virtual void renderTarget_setScissor(sint32 scissorX, sint32 scissorY, sint32 scissorWidth, sint32 scissorHeight) = 0;
 
 	virtual LatteCachedFBO* rendertarget_createCachedFBO(uint64 key) = 0;
-	virtual void rendertarget_deleteCachedFBO(LatteCachedFBO* fbo) = 0;
-	virtual void rendertarget_bindFramebufferObject(LatteCachedFBO* cfbo) = 0;
+	virtual void rendertarget_deleteCachedFBO(LatteCachedFBO* fbo);
+	virtual void rendertarget_bindFramebufferObject(LatteCachedFBO* cfbo);
+
+	LatteCachedFBO* m_activeFBO = nullptr;
 
 	// texture functions
 	virtual void* texture_acquireTextureUploadBuffer(uint32 size) = 0;
@@ -140,7 +143,7 @@ public:
 
 	// core drawing logic
 	virtual void draw_beginSequence() = 0;
-	virtual void draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, bool isFirst) = 0;
+	virtual bool draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, bool isFirst) = 0;
 	virtual void draw_endSequence() = 0;
 
 	// index

@@ -3303,17 +3303,6 @@ LatteCachedFBO* VulkanRenderer::rendertarget_createCachedFBO(uint64 key)
 	return new CachedFBOVk(key, m_logicalDevice);
 }
 
-void VulkanRenderer::rendertarget_deleteCachedFBO(LatteCachedFBO* cfbo)
-{
-	if (cfbo == m_state.activeFBO)
-		m_state.activeFBO = nullptr;
-}
-
-void VulkanRenderer::rendertarget_bindFramebufferObject(LatteCachedFBO* cfbo)
-{
-	m_state.activeFBO = (CachedFBOVk*)cfbo;
-}
-
 void* VulkanRenderer::texture_acquireTextureUploadBuffer(uint32 size)
 {
 	return memoryManager->TextureUploadBufferAcquire(size);
