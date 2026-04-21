@@ -12,7 +12,6 @@ public:
 
 	void CleanupShaderObj();
 	void CleanupProgramObj();
-	void PreponeCompilation() override;
 	bool IsCompiled() override;
 	bool WaitForCompiled() override;
 
@@ -31,6 +30,8 @@ public:
 	static void ShaderCacheLoading_begin(uint64 cacheTitleId);
 	static void ShaderCacheLoading_end();
     static void ShaderCacheLoading_Close();
+protected:
+	void FinishCompilation() override;
 
 private:
 	GLuint m_program;
@@ -38,13 +39,14 @@ private:
 	LatteDecompilerShader* m_decompilerShader = nullptr;
 
 	bool loadBinary();
+	bool isBinaryCached();
 	void storeBinary();
 
 	std::string m_glslSource;
 
 	bool m_shader_attached{ false };
 	bool m_isCompiled{ false };
-	bool m_binaryLoaded { false };
+	std::vector<uint8> m_binaryCacheData { false };
 
 	static std::unique_ptr<class FileCache> s_programBinaryCache;
 };

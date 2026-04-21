@@ -184,6 +184,8 @@ add_library(CemuCafe
   HW/Latte/Renderer/RendererOuputShader.h
   HW/Latte/Renderer/RendererShader.cpp
   HW/Latte/Renderer/RendererShader.h
+	HW/Latte/Renderer/ShaderThreadPool.cpp
+	HW/Latte/Renderer/ShaderThreadPool.h
   HW/Latte/Renderer/Vulkan/CachedFBOVk.cpp
   HW/Latte/Renderer/Vulkan/CachedFBOVk.h
   HW/Latte/Renderer/Vulkan/CocoaSurface.h

@@ -4,21 +4,11 @@
 #include "util/helpers/ConcurrentQueue.h"
 
 #include <vulkan/vulkan_core.h>
-#include "util/helpers/Semaphore.h"
 #include "util/helpers/fspinlock.h"
 
 class RendererShaderVk : public RendererShader
 {
 	friend class VulkanRenderer;
-	friend class _ShaderVkThreadPool;
-
-	enum class COMPILATION_STATE : uint32
-	{
-		NONE,
-		QUEUED,
-		COMPILING,
-		DONE
-	};
 
 public:
 	static void ShaderCacheLoading_begin(uint64 cacheTitleId);
@@ -49,18 +39,16 @@ public:
 		s_dependencyLock.unlock();
 	}
 
-	void PreponeCompilation() override;
 	bool IsCompiled() override;
 	bool WaitForCompiled() override;
 
 private:
-  void CompileInternal();
+  virtual void CompileInternal() override;
 
-	void FinishCompilation();
+	void FinishCompilation() override;
 
 	VkShaderModule m_shader_module = nullptr;
 
-	StateSemaphore<COMPILATION_STATE> m_compilationState{ COMPILATION_STATE::NONE };
 
 	std::string m_glslCode;
 

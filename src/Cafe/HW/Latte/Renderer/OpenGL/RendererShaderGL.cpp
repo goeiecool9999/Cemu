@@ -10,9 +10,9 @@
 extern std::atomic_int g_compiled_shaders_total;
 extern std::atomic_int g_compiled_shaders_async;
 
-bool s_isLoadingShaders{false};
+extern bool s_isLoadingShaders;
 
-bool RendererShaderGL::loadBinary()
+bool RendererShaderGL::isBinaryCached()
 {
 	if (!s_programBinaryCache)
 		return false;
@@ -30,19 +30,20 @@ bool RendererShaderGL::loadBinary()
 	if (cacheFileData.size() <= sizeof(uint32))
 		return false;
 
-	uint32 shaderBinFormat = *(uint32*)(cacheFileData.data());
+	return true;
+}
 
-	m_program = glCreateProgram();
-	glProgramBinary(m_program, shaderBinFormat, cacheFileData.data()+4, cacheFileData.size()-4);
+bool RendererShaderGL::loadBinary()
+{
+	uint32 shaderBinFormat = *(uint32*)(m_binaryCacheData.data());
+	glProgramBinary(m_program, shaderBinFormat, m_binaryCacheData.data()+4, m_binaryCacheData.size()-4);
 
 	int status = -1;
 	glGetProgramiv(m_program, GL_LINK_STATUS, &status);
 	if (status != GL_TRUE)
 	{
-		CleanupProgramObj();
 		return false;
 	}
-	m_binaryLoaded = true;
 	return true;
 }
 
@@ -76,6 +77,7 @@ void RendererShaderGL::storeBinary()
 RendererShaderGL::RendererShaderGL(ShaderType type, uint64 baseHash, uint64 auxHash, bool isGameShader, bool isGfxPackShader, std::string&& glslSource)
 	: RendererShader(type, baseHash, auxHash, isGameShader, isGfxPackShader), m_glslSource(std::move(glslSource))
 {
+
 	GLenum glShaderType;
 	switch (type)
 	{
@@ -92,41 +94,13 @@ RendererShaderGL::RendererShaderGL(ShaderType type, uint64 baseHash, uint64 auxH
 		cemu_assert_debug(false);
 	}
 
-	if (s_isLoadingShaders)
-	{
-		if (loadBinary())
-		{
-			m_glslSource.clear();
-			m_glslSource.shrink_to_fit();
-			return;
-		}
-	}
-
 	m_shader_object = glCreateShader(glShaderType);
-
-	const char *c_str = m_glslSource.c_str();
-	const GLint size = (GLint)m_glslSource.size();
-	glShaderSource(m_shader_object, 1, &c_str, &size);
-	glCompileShader(m_shader_object);
-
-	// set debug name
-	if (LaunchSettings::NSightModeEnabled())
-	{
-		auto objNameStr = fmt::format("shader_{:016x}_{:016x}", m_baseHash, m_auxHash);
-		glObjectLabel(GL_SHADER, m_shader_object, objNameStr.size(), objNameStr.c_str());
-	}
 
 	m_program = glCreateProgram();
 	glProgramParameteri(m_program, GL_PROGRAM_SEPARABLE, GL_TRUE);
 	glProgramParameteri(m_program, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE);
-	glAttachShader(m_program, m_shader_object);
-	m_shader_attached = true;
-	glLinkProgram(m_program);
-
-	// we can throw away the GLSL code to conserve RAM
-	m_glslSource.clear();
-	m_glslSource.shrink_to_fit();
 }
+
 
 RendererShaderGL::~RendererShaderGL()
 {
@@ -155,25 +129,19 @@ void RendererShaderGL::CleanupProgramObj()
 	m_program = 0;
 }
 
-void RendererShaderGL::PreponeCompilation()
-{
-	// the logic for initiating compilation is currently in the constructor
-	// here we only guarantee that it is finished before we return
-	if (m_isCompiled)
-		return;
-	WaitForCompiled();
-}
-
 bool RendererShaderGL::IsCompiled()
 {
 	if(m_isCompiled)
 		return true;
 
-	if(!glMaxShaderCompilerThreadsARB || m_binaryLoaded)
+	if(!glMaxShaderCompilerThreadsARB || !m_binaryCacheData.empty())
 	{
 		WaitForCompiled();
 		return true;
 	}
+
+	if (!m_compilationState.hasState(COMPILATION_STATE::DONE))
+		return false;
 
 	GLint isShaderComplete = 0, isProgramComplete = 0;
 	glGetShaderiv(m_shader_object, GL_COMPLETION_STATUS_ARB, &isShaderComplete);
@@ -189,12 +157,35 @@ bool RendererShaderGL::WaitForCompiled()
 {
 	if (m_isCompiled)
 		return true;
-	if (m_binaryLoaded)
+
+	if (s_isLoadingShaders)
 	{
-		LatteShader_prepareSeparableUniforms(m_decompilerShader);
-		m_isCompiled = true;
-		return true;
+		if (loadBinary())
+		{
+			FinishCompilation();
+			return true;
+		}
 	}
+
+
+	const char *c_str = m_glslSource.c_str();
+	const GLint size = (GLint)m_glslSource.size();
+	glShaderSource(m_shader_object, 1, &c_str, &size);
+	glCompileShader(m_shader_object);
+
+	// set debug name
+	if (LaunchSettings::NSightModeEnabled())
+	{
+		auto objNameStr = fmt::format("shader_{:016x}_{:016x}", m_baseHash, m_auxHash);
+		glObjectLabel(GL_SHADER, m_shader_object, objNameStr.size(), objNameStr.c_str());
+	}
+
+	glAttachShader(m_program, m_shader_object);
+	m_shader_attached = true;
+	glLinkProgram(m_program);
+
+	m_glslSource.clear();
+	m_glslSource.shrink_to_fit();
 
 	char infoLog[8 * 1024];
 	GLint log_length;
@@ -243,10 +234,7 @@ bool RendererShaderGL::WaitForCompiled()
 
 	m_isCompiled = true;
 	CleanupShaderObj();
-	if (m_decompilerShader)
-	{
-		LatteShader_prepareSeparableUniforms(m_decompilerShader);
-	}
+	FinishCompilation();
 
 	return true;
 }
@@ -327,6 +315,14 @@ void RendererShaderGL::ShaderCacheLoading_Close()
     g_compiled_shaders_total = 0;
     g_compiled_shaders_async = 0;
 }
-
+void RendererShaderGL::FinishCompilation()
+{
+	m_glslSource.clear();
+	m_glslSource.shrink_to_fit();
+	if (m_decompilerShader)
+	{
+		LatteShader_prepareSeparableUniforms(m_decompilerShader);
+	}
+}
 
 std::unique_ptr<class FileCache> RendererShaderGL::s_programBinaryCache{};
