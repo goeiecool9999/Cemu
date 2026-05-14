@@ -105,7 +105,7 @@ void gx2Export_GX2CopyColorBufferToScanBuffer(PPCInterpreter_t* hCPU)
 	gx2WriteGather_submitU32AsBE((uint32)colorBuffer->surface.pitch);
 	gx2WriteGather_submitU32AsBE((uint32)colorBuffer->surface.tileMode.value());
 	gx2WriteGather_submitU32AsBE((uint32)colorBuffer->surface.swizzle);
-	gx2WriteGather_submitU32AsBE(_swapEndianU32(colorBuffer->viewFirstSlice));
+	gx2WriteGather_submitU32AsBE((uint32)colorBuffer->viewFirstSlice);
 	gx2WriteGather_submitU32AsBE((uint32)colorBuffer->surface.format.value());
 	gx2WriteGather_submitU32AsBE(hCPU->gpr[4]);
 
@@ -161,9 +161,9 @@ void _GX2InitScanBuffer(GX2ColorBuffer* colorBuffer, sint32 width, sint32 height
 	colorBuffer->surface.resFlag = GX2_RESFLAG_USAGE_TEXTURE | GX2_RESFLAG_USAGE_COLOR_BUFFER;
 	colorBuffer->surface.width = width;
 	colorBuffer->surface.height = height;
-	colorBuffer->viewFirstSlice = _swapEndianU32(0);
-	colorBuffer->viewNumSlices = _swapEndianU32(1);
-	colorBuffer->viewMip = _swapEndianU32(0);
+	colorBuffer->viewFirstSlice = 0;
+	colorBuffer->viewNumSlices = 1;
+	colorBuffer->viewMip = 0;
 	colorBuffer->surface.numLevels = 1;
 	colorBuffer->surface.dim = Latte::E_DIM::DIM_2D;
 	colorBuffer->surface.swizzle = 0;
@@ -294,6 +294,8 @@ void gx2Export_GX2SetSemaphore(PPCInterpreter_t* hCPU)
 	}
 	uint32 semaphoreControl = (SEM_SEL << 29);
 	semaphoreControl |= 0x1000; // WAIT_ON_SIGNAL
+
+	GX2::GX2ReserveCmdSpace(3);
 	gx2WriteGather_submitU32AsBE(pm4HeaderType3(IT_MEM_SEMAPHORE, 2));
 	gx2WriteGather_submitU32AsBE(memory_virtualToPhysical(semaphoreMPTR)); // semaphore physical address
 	gx2WriteGather_submitU32AsBE(semaphoreControl); // control

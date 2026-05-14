@@ -25,7 +25,7 @@ ModuleWindow::ModuleWindow(DebuggerWindow2& parent, const wxPoint& main_position
 
 	wxBoxSizer* main_sizer = new wxBoxSizer(wxVERTICAL);
 
-	m_modules = new wxListView(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxLC_REPORT);
+	m_modules = new wxListView(this, wxID_ANY);
 
 	wxListItem col0;
 	col0.SetId(ColumnName);
@@ -129,6 +129,5 @@ void ModuleWindow::OnLeftDClick(wxMouseEvent& event)
 	const auto address = std::stoul(text.ToStdString(), nullptr, 16);
 	if (address == 0)
 		return;
-	debuggerState.debugSession.instructionPointer = address;
-	g_debuggerDispatcher.MoveIP();
+	debugger_jumpToAddressInDisasm(address);
 }

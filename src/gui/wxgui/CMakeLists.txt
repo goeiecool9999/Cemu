@@ -50,6 +50,8 @@ add_library(CemuWxGui STATIC
   AudioDebuggerWindow.h
   DownloadGraphicPacksWindow.cpp
   DownloadGraphicPacksWindow.h
+  DownloadCustomGraphicPackWindow.cpp
+  DownloadCustomGraphicPackWindow.h
   GameProfileWindow.cpp
   GameProfileWindow.h
   GameUpdateWindow.cpp
@@ -132,6 +134,8 @@ endif()
 
 set_property(TARGET CemuWxGui PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
+cemu_use_precompiled_header(CemuWxGui)
+
 
 target_include_directories(CemuWxGui PUBLIC "../")
 # PUBLIC because rapidjson/document.h is included in ChecksumTool.h
@@ -143,7 +147,7 @@ target_link_libraries(CemuWxGui PRIVATE
   libzip::zip
   ZArchive::zarchive
   CemuComponents
-  SDL2::SDL2
+  SDL3::SDL3
   pugixml::pugixml
   CemuCafe
   PUBLIC

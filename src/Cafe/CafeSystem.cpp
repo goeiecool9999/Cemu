@@ -427,10 +427,8 @@ void cemu_initForGame()
 	cemuLog_log(LogType::Force, "------- Run title -------");
 	// wait till GPU thread is initialized
 	while (g_isGPUInitFinished == false) std::this_thread::sleep_for(std::chrono::milliseconds(50));
-	// init initial thread
-	OSThread_t* initialThread = coreinit::OSGetDefaultThread(1);
-	coreinit::OSSetThreadPriority(initialThread, 16);
-	coreinit::OSRunThread(initialThread, PPCInterpreter_makeCallableExportDepr(coreinit_start), 0, nullptr);
+	// run coreinit rpl_entry
+	RPLLoader_CallCoreinitEntrypoint();
 	// init AX and start AX I/O thread
 	snd_core::AXOut_init();
 }
@@ -541,7 +539,23 @@ namespace CafeSystem
 		else
 			platform = "Linux";
 		#elif BOOST_OS_MACOS
-		platform = "MacOS";
+		char productVersion[256]{};
+		size_t productVersionSize = sizeof(productVersion);
+		const int productVersionResult = sysctlbyname("kern.osproductversion", productVersion, &productVersionSize, nullptr, 0);
+
+		char buildVersion[256]{};
+		size_t buildVersionSize = sizeof(buildVersion);
+		const int buildVersionResult = sysctlbyname("kern.osversion", buildVersion, &buildVersionSize, nullptr, 0);
+
+		if (productVersionResult == 0 && buildVersionResult == 0)
+			buffer = fmt::format("macOS {} ({})", productVersion, buildVersion);
+		else if (productVersionResult == 0)
+			buffer = fmt::format("macOS {}", productVersion);
+		else
+			buffer = "macOS";
+
+		platform = buffer.c_str();
+		
 		#elif BOOST_OS_BSD
 		#if defined(__FreeBSD__)
 		platform = "FreeBSD";

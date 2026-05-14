@@ -31,7 +31,8 @@
 #endif
 
 #define SDL_MAIN_HANDLED
-#include <SDL.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
 
 #if BOOST_OS_LINUX
 #define _putenv(__s) putenv((char*)(__s))
@@ -167,18 +168,28 @@ void UnitTests()
 bool isConsoleConnected = false;
 void requireConsole()
 {
-	#if BOOST_OS_WINDOWS
-	if (isConsoleConnected)
-		return;
+    #if BOOST_OS_WINDOWS
+    if (isConsoleConnected)
+        return;
 
-	if (AttachConsole(ATTACH_PARENT_PROCESS) != FALSE)
-	{
-		freopen("CONIN$", "r", stdin);
-		freopen("CONOUT$", "w", stdout);
-		freopen("CONOUT$", "w", stderr);
-		isConsoleConnected = true;
-	}
-	#endif
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD dwFileType = GetFileType(hOut);
+
+    if (dwFileType == FILE_TYPE_UNKNOWN || dwFileType == FILE_TYPE_CHAR)
+    {
+        if (AttachConsole(ATTACH_PARENT_PROCESS) != FALSE)
+        {
+            freopen("CONOUT$", "w", stdout);
+            freopen("CONOUT$", "w", stderr);
+            freopen("CONIN$", "r", stdin);
+            isConsoleConnected = true;
+        }
+    }
+    else
+    {
+        isConsoleConnected = true; 
+    }
+    #endif
 }
 
 void HandlePostUpdate()
@@ -245,8 +256,14 @@ int main(int argc, char* argv[])
 
 #else
 
+int BreathOfTheWildChildProcessMain();
 int main(int argc, char *argv[])
 {
+#if BOOST_OS_LINUX
+	if (getenv("CEMU_DETECT_RADV") != nullptr)
+		return BreathOfTheWildChildProcessMain();
+#endif
+
 #if BOOST_OS_LINUX || BOOST_OS_BSD
     XInitThreads();
 #endif

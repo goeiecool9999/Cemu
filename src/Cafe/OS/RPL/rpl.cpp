@@ -267,6 +267,7 @@ bool RPLLoader_ProcessHeaders(std::string_view moduleName, uint8* rplData, uint3
 	rplLoaderContext->fileInfo.tlsModuleIndex = fileInfoPtr->tlsModuleIndex;
 	rplLoaderContext->fileInfo.sdataBase1 = fileInfoPtr->sdataBase1;
 	rplLoaderContext->fileInfo.sdataBase2 = fileInfoPtr->sdataBase2;
+	rplLoaderContext->fileInfo.flags = fileInfoPtr->flags;
 
 	// init section address table
 	rplLoaderContext->sectionAddressTable2.resize(sectionCount);
@@ -1793,6 +1794,7 @@ void RPLLoader_UnloadModule(RPLDependency* rplDependency, bool skipPPCCalls)
 
 	if (rplDependency->rplHLEModule)
 	{
+		cemu_assert_debug(!rplDependency->rplLoaderContext);
 		// HLE module unload logic is handled by parent functions for now
 		return;
 	}
@@ -1955,7 +1957,6 @@ void RPLLoader_AddDependency(std::string_view name)
 	newDependency->coreinitHandle = rplLoader_currentHandleCounter;
 	newDependency->tlsModuleIndex = rplLoader_currentTlsModuleIndex;
 	newDependency->isCafeOSModule = RPLLoader_IsKnownCafeOSModule(moduleName);
-	newDependency->rplHLEModule = RPLLoader_GetHLECafeOSModule(moduleName);
 	rplLoader_currentTlsModuleIndex++; // todo - delay handle and tls allocation until the module is actually loaded. It may not exist
 	rplLoader_currentHandleCounter++;
 	if (rplLoader_currentTlsModuleIndex == 0x7FFF)
@@ -1972,6 +1973,12 @@ void RPLLoader_AddDependency(std::string_view name)
 	}
 	if (newDependency->filepath.size() >= RPL_MODULE_PATH_LENGTH)
 		cemuLog_log(LogType::Force, "RPLLoader_AddDependency(): RPL path too long \"{}\"", newDependency->filepath);
+	// if no CafeLibs RPL is present then try to load as a HLE module
+	// we dont check for isCafeOSModule == true here because the user might want to replace application RPLs in some cases
+	const auto cafeLibsFilePath = ActiveSettings::GetUserDataPath("cafeLibs/{}", newDependency->filepath);
+	std::error_code ec;
+	if (!fs::exists(cafeLibsFilePath, ec))
+		newDependency->rplHLEModule = RPLLoader_GetHLECafeOSModule(moduleName);
 	rplDependencyList.push_back(newDependency);
 }
 
@@ -2140,8 +2147,8 @@ void RPLLoader_LoadDependency(RPLDependency* dependency)
 	// attempt to load rpl from Cemu's /cafeLibs/ directory
 	if (ActiveSettings::LoadSharedLibrariesEnabled())
 	{
-		const auto filePath = ActiveSettings::GetUserDataPath("cafeLibs/{}", dependency->filepath);
-		auto fileData = FileStream::LoadIntoMemory(filePath);
+		const auto cafeLibsFilePath = ActiveSettings::GetUserDataPath("cafeLibs/{}", dependency->filepath);
+		auto fileData = FileStream::LoadIntoMemory(cafeLibsFilePath);
 		if (fileData)
 		{
 			cemuLog_log(LogType::Force, "Loading RPL: /cafeLibs/{}", dependency->filepath);
@@ -2298,6 +2305,25 @@ void RPLLoader_CallEntrypoints()
 	}
 }
 
+// calls the entrypoint of coreinit and marks it as called so that RPLLoader_CallEntrypoints() wont call it again later
+void RPLLoader_CallCoreinitEntrypoint()
+{
+	// for HLE modules we need to check the dependency list
+	for (auto& dependency : rplDependencyList)
+	{
+		if (strcmp(dependency->modulename, "coreinit") != 0)
+			continue;
+		if (!dependency->rplHLEModule)
+			continue;
+		if (dependency->hleEntrypointCalled)
+			continue;
+		dependency->rplHLEModule->rpl_entry(dependency->coreinitHandle, coreinit::RplEntryReason::Loaded);
+		dependency->hleEntrypointCalled = true;
+		return;
+	}
+	cemu_assert_unimplemented(); // coreinit.rpl present in cafelibs? We currently do not support native coreinit and no thread context exists yet to do a PPC call
+}
+
 void RPLLoader_NotifyControlPassedToApplication()
 {
 	rplLoader_applicationHasMemoryControl = true;
@@ -2343,11 +2369,13 @@ uint32 RPLLoader_FindModuleOrHLEExport(uint32 moduleHandle, bool isData, const c
 
 uint32 RPLLoader_GetSDA1Base()
 {
+	cemu_assert_debug(rplModuleCount > 0); // this should not be called before the main executable was loaded
 	return rplLoader_sdataAddr;
 }
 
 uint32 RPLLoader_GetSDA2Base()
 {
+	cemu_assert_debug(rplModuleCount > 0);
 	return rplLoader_sdata2Addr;
 }
 

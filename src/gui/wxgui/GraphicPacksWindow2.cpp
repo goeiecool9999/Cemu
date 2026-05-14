@@ -2,6 +2,7 @@
 #include "wxgui/wxgui.h"
 #include "wxgui/GraphicPacksWindow2.h"
 #include "wxgui/DownloadGraphicPacksWindow.h"
+#include "wxgui/DownloadCustomGraphicPackWindow.h"
 #include "Cafe/GraphicPack/GraphicPack2.h"
 #include "config/CemuConfig.h"
 #include "config/ActiveSettings.h"
@@ -43,44 +44,47 @@ void GraphicPacksWindow2::FillGraphicPackList() const
 
 	for(auto& p : graphic_packs)
 	{
-		// filter graphic packs by given title id
-		if (m_filter_installed_games && !m_installed_games.empty())
+		if (!p->IsUniversal())
 		{
-			bool found = false;
-			for (uint64 titleId : p->GetTitleIds())
+			// filter graphic packs by given title id
+			if (m_filter_installed_games && !m_installed_games.empty())
 			{
-				if (std::find(m_installed_games.cbegin(), m_installed_games.cend(), titleId) != m_installed_games.cend())
-				{
-					found = true;
-					break;
-				}
-			}
-
-			if (!found)
-				continue;
-		}
-
-		// filter graphic packs by given title id
-		if(has_filter)
-		{
-			bool found = false;
-
-			if (boost::icontains(p->GetVirtualPath(), m_filter))
-				found = true;
-			else
-			{
+				bool found = false;
 				for (uint64 titleId : p->GetTitleIds())
 				{
-					if (boost::icontains(fmt::format("{:x}", titleId), m_filter))
+					if (std::find(m_installed_games.cbegin(), m_installed_games.cend(), titleId) != m_installed_games.cend())
 					{
 						found = true;
 						break;
 					}
 				}
+	
+				if (!found)
+					continue;
 			}
-
-			if (!found)
-				continue;
+	
+			// filter graphic packs by given title id
+			if(has_filter)
+			{
+				bool found = false;
+	
+				if (boost::icontains(p->GetVirtualPath(), m_filter))
+					found = true;
+				else
+				{
+					for (uint64 titleId : p->GetTitleIds())
+					{
+						if (boost::icontains(fmt::format("{:x}", titleId), m_filter))
+						{
+							found = true;
+							break;
+						}
+					}
+				}
+	
+				if (!found)
+					continue;
+			}
 		}
 
 		const auto& path = p->GetVirtualPath();
@@ -128,7 +132,7 @@ void GraphicPacksWindow2::FillGraphicPackList() const
 				auto tmp_text = m_graphic_pack_tree->GetItemText(node);
 				m_graphic_pack_tree->SetItemText(node, tmp_text + " (may not be compatible with Vulkan)");
 			}
-			else if (p->GetVersion() != 3 && p->GetVersion() != 4 && p->GetVersion() != 5 && p->GetVersion() != 6 && p->GetVersion() != GraphicPack2::GFXPACK_VERSION_7)
+			else if (p->GetVersion() != 3 && p->GetVersion() != 4 && p->GetVersion() != 5 && p->GetVersion() != 6 && p->GetVersion() != GraphicPack2::GFXPACK_VERSION_7 && p->GetVersion() != GraphicPack2::GFXPACK_VERSION_8)
 			{
 				auto tmp_text = m_graphic_pack_tree->GetItemText(node);
 				m_graphic_pack_tree->SetItemText(node, tmp_text + " (Unsupported version)");
@@ -217,15 +221,15 @@ GraphicPacksWindow2::GraphicPacksWindow2(wxWindow* parent, uint64_t title_id_fil
 		filter_row->SetFlexibleDirection(wxBOTH);
 		filter_row->SetNonFlexibleGrowMode(wxFLEX_GROWMODE_SPECIFIED);
 
-		const auto text = new wxStaticText(left_panel, wxID_ANY, _("Filter"), wxDefaultPosition, wxDefaultSize, 0);
+		const auto text = new wxStaticText(left_panel, wxID_ANY, _("Filter"));
 		text->Wrap(-1);
 		filter_row->Add(text, 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
 
-		m_filter_text = new wxTextCtrl(left_panel, wxID_ANY, wxString::FromUTF8(m_filter), wxDefaultPosition, wxDefaultSize, 0);
+		m_filter_text = new wxTextCtrl(left_panel, wxID_ANY, wxString::FromUTF8(m_filter));
 		filter_row->Add(m_filter_text, 0, wxALL | wxEXPAND, 5);
 		m_filter_text->Bind(wxEVT_COMMAND_TEXT_UPDATED, &GraphicPacksWindow2::OnFilterUpdate, this);
 
-		m_installed_games_only = new wxCheckBox(left_panel, wxID_ANY, _("Installed games"), wxDefaultPosition, wxDefaultSize, 0);
+		m_installed_games_only = new wxCheckBox(left_panel, wxID_ANY, _("Installed games"));
 		m_installed_games_only->SetValue(m_filter_installed_games);
 		filter_row->Add(m_installed_games_only, 0, wxALL | wxEXPAND, 5);
 		m_installed_games_only->Bind(wxEVT_CHECKBOX, &GraphicPacksWindow2::OnInstalledGamesChanged, this);
@@ -299,6 +303,11 @@ GraphicPacksWindow2::GraphicPacksWindow2(wxWindow* parent, uint64_t title_id_fil
 		sizer->Add(new wxStaticLine(m_right_panel, wxID_ANY), 0, wxLEFT|wxRIGHT | wxEXPAND, 3);
 
 		auto* row = new wxBoxSizer(wxHORIZONTAL);
+		
+		m_download_from_url = new wxButton(m_right_panel, wxID_ANY, _("Download pack from URL"));
+		m_download_from_url->Bind(wxEVT_BUTTON, &GraphicPacksWindow2::OnClickCustomDownload, this);
+		row->Add(m_download_from_url, 0, wxALL, 5);
+		
 		m_update_graphicPacks = new wxButton(m_right_panel, wxID_ANY, _("Download latest community graphic packs"));
 		m_update_graphicPacks->Bind(wxEVT_BUTTON, &GraphicPacksWindow2::OnCheckForUpdates, this);
 		row->Add(m_update_graphicPacks, 0, wxALL, 5);
@@ -594,6 +603,16 @@ void GraphicPacksWindow2::OnReloadShaders(wxCommandEvent& event)
 {
 	if (m_shown_graphic_pack)
 		ReloadPack(m_shown_graphic_pack);
+}
+
+void GraphicPacksWindow2::OnClickCustomDownload(wxCommandEvent& event)
+{
+	DownloadCustomGraphicPackWindow frame(this);
+	if (frame.ShowModal() == wxID_OK && !CafeSystem::IsTitleRunning())
+	{
+		RefreshGraphicPacks();
+		FillGraphicPackList();
+	}
 }
 
 void GraphicPacksWindow2::OnCheckForUpdates(wxCommandEvent& event)

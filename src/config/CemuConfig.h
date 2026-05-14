@@ -2,8 +2,6 @@
 
 #include "ConfigValue.h"
 #include "XMLConfig.h"
-#include "util/math/vector2.h"
-#include "Cafe/Account/Account.h"
 
 enum class NetworkService;
 
@@ -432,6 +430,7 @@ struct CemuConfig
 
 	// graphics
 	ConfigValue<GraphicAPI> graphic_api{ kVulkan };
+	std::array<uint8, 16> legacy_graphic_device_uuid{}; // placeholder option for backwards compatibility with settings from 2.6 and before (renamed to "vkDevice")
 	std::array<uint8, 16> vk_graphic_device_uuid;
 	uint64 mtl_graphic_device_uuid{ 0 };
 	ConfigValue<int> vsync{ 0 }; // 0 = off, 1+ = depending on render backend
@@ -488,7 +487,7 @@ struct CemuConfig
 	// account
 	struct
 	{
-		ConfigValueBounds<uint32> m_persistent_id{ Account::kMinPersistendId, Account::kMinPersistendId, 0xFFFFFFFF };
+		ConfigValueBounds<uint32> m_persistent_id{0x80000001, 0x80000001, 0xFFFFFFFF};
 		ConfigValue<bool> legacy_online_enabled{false};
 		ConfigValue<int> legacy_active_service{0};
 		std::unordered_map<uint32, NetworkService> service_select; // per-account service index. Key is persistentId

@@ -1,10 +1,7 @@
 #include "config/CemuConfig.h"
-#include "WindowSystem.h"
-
 #include "util/helpers/helpers.h"
 #include "config/ActiveSettings.h"
-
-#include "ActiveSettings.h"
+#include "Cafe/Account/Account.h"
 
 void CemuConfig::SetMLCPath(fs::path path, bool save)
 {
@@ -127,7 +124,11 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	// graphics
 	auto graphic = parser.get("Graphic");
 	graphic_api = graphic.get("api", kOpenGL);
-	graphic.get("vkDevice", vk_graphic_device_uuid);
+	graphic.get("device", legacy_graphic_device_uuid);
+	if (graphic.get("vkDevice").valid())
+		graphic.get("vkDevice", vk_graphic_device_uuid);
+	else
+		vk_graphic_device_uuid = legacy_graphic_device_uuid;
 	mtl_graphic_device_uuid = graphic.get("mtlDevice", 0);
 	vsync = graphic.get("VSync", 0);
 	overrideAppGammaPreference = graphic.get("OverrideAppGammaPreference", false);
@@ -359,6 +360,7 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	// graphics
 	auto graphic = config.set("Graphic");
 	graphic.set("api", graphic_api);
+	graphic.set("device", legacy_graphic_device_uuid);
 	graphic.set("vkDevice", vk_graphic_device_uuid);
 	graphic.set("mtlDevice", mtl_graphic_device_uuid);
 	graphic.set("VSync", vsync);

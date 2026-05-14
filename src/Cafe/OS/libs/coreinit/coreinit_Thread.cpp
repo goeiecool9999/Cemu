@@ -1483,6 +1483,11 @@ namespace coreinit
 		s_threadToFiber.clear();
 	}
 
+	bool OSIsSchedulerActive()
+	{
+		return sSchedulerActive;
+	}
+
 	SysAllocator<OSThread_t, PPC_CORE_COUNT> s_defaultThreads;
 	SysAllocator<uint8, PPC_CORE_COUNT * 1024 * 1024> s_stack;
 
@@ -1588,7 +1593,7 @@ namespace coreinit
 		}
 	}
 
-	void InitializeThread()
+	void MapThreadExports()
 	{
 		cafeExportRegister("coreinit", OSCreateThreadType, LogType::CoreinitThread);
 		cafeExportRegister("coreinit", OSCreateThread, LogType::CoreinitThread);
@@ -1632,16 +1637,16 @@ namespace coreinit
 		// OSThreadQueue
 		cafeExportRegister("coreinit", OSInitThreadQueue, LogType::CoreinitThread);
 		cafeExportRegister("coreinit", OSInitThreadQueueEx, LogType::CoreinitThread);
-
-		OSInitThreadQueue(g_activeThreadQueue.GetPtr());
-		for (sint32 i = 0; i < PPC_CORE_COUNT; i++)
-			OSInitThreadQueue(g_coreRunQueue.GetPtr() + i);
-
-		for (sint32 i = 0; i < PPC_CORE_COUNT; i++)
-			__currentCoreThread[i] = nullptr;
-
-        __OSInitDefaultThreads();
-		__OSInitTerminatorThreads();
-
     }
+
+	void InitializeThread()
+	{
+		OSInitThreadQueue(g_activeThreadQueue.GetPtr());
+		for (sint32 i = 0; i < Espresso::CORE_COUNT; i++)
+			OSInitThreadQueue(g_coreRunQueue.GetPtr() + i);
+		for (sint32 i = 0; i < Espresso::CORE_COUNT; i++)
+			__currentCoreThread[i] = nullptr;
+		__OSInitDefaultThreads();
+		__OSInitTerminatorThreads();
+	}
 }
